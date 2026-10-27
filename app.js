@@ -54,6 +54,9 @@
   function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296 } }
   function codeFor(no) {
     for (var i = 0; i < D.verifyDb.length; i++) if (D.verifyDb[i].no === no) return D.verifyDb[i].code
+    return genCode(no)
+  }
+  function genCode(no) {
     var r = rng(hash(no)), a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', s = ''
     for (var j = 0; j < 8; j++) { s += a.charAt(Math.floor(r() * a.length)); if (j === 3) s += '-' }
     return s
@@ -88,10 +91,10 @@
 
   /* ---------- history / checks ---------- */
   function ownRxs() {
-    return (D.history[S.pid] || []).filter(function (r) { return r.byMe }).sort(function (a, b) { return a.date < b.date ? 1 : -1 })
+    return (D.history[S.pid] || []).filter(function (r) { return isMine(r) && !(S.draft && S.draft.editing === r.id) }).sort(function (a, b) { return a.date < b.date ? 1 : -1 })
   }
   function sourceRxs() {
-    return (D.history[S.pid] || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : -1 }).slice(0, 2)
+    return (D.history[S.pid] || []).filter(function (r) { return !(S.draft && S.draft.editing === r.id) }).sort(function (a, b) { return a.date < b.date ? 1 : -1 }).slice(0, 2)
   }
   function genericsOf(g) { return String(g || '').toLowerCase().split('+').map(function (x) { return x.trim() }).filter(Boolean) }
   function daysText(d) { return d === null ? 'continuous' : d + (d === 1 ? ' day' : ' days') }
@@ -321,6 +324,9 @@
   /* validation (field-level) shown after a failed Complete */
   function validateRx() {
     var errs = []
+    if (!medOn() && S.draft.lines.length) errs.push('Medicines: Medicine prescribing is not enabled for this doctor')
+    if (isAnimal() && secOn('b:animalPatient') && !num(S.draft.vitals.weight)) errs.push('Animal weight: weight (kg) is required for an animal patient')
+    if (secOn('b:growth') && !num(S.draft.vitals.weight)) errs.push('Growth: weight (kg) is required, it drives mg/kg dosing')
     S.draft.lines.forEach(function (l, i) {
       if (isStop(l)) return
       if (l.cond.some(function (r) { return !r.c.trim() || !r.d.trim() })) errs.push('Line ' + (i + 1) + ': every sliding-scale row needs a condition and a dose')
@@ -430,11 +436,12 @@
   /* ---------- draft ---------- */
   function nextRxNo() { return 'RX-A12345-' + pad(S.rxCounter, 4) }
   function newDraft(p) {
+    S.sections = S.sections.filter(function (c) { return !c.adhoc }) /* ad-hoc blocks last for one prescription only */
     var notes = {}
     allSecDefs().forEach(function (s) { if (s.kind === 'chips' || s.kind === 'advice') notes[s.id] = [] })
     var dr = {
       vitals: Object.assign({}, p.vitals), notes: notes, dx: [], dxType: 'PROVISIONAL', tests: [], libAdvice: [],
-      fu: { unit: 'days', n: '', note: '', rem: true, remDays: '1', slot: null }, res: [], bnd: S.bndDefault, orders: [], refs: [], adm: null, cert: null, lines: [], continued: null, bannerOff: false, rxNo: nextRxNo()
+      fu: { unit: 'days', n: '', note: '', rem: true, remDays: '1', slot: null }, res: [], blocks: {}, bnd: S.bndDefault, orders: [], refs: [], adm: null, cert: null, lines: [], continued: null, bannerOff: false, rxNo: nextRxNo()
     }
     applyPrefill(dr, p)
     return dr
@@ -446,6 +453,7 @@
   function allergyOf(t) { var m = /^allergy\s*:\s*(.+)$/i.exec(t); return m ? m[1].trim() : '' }
   function pfItems(p) {
     var last = p.last || {}, out = { kco: [], dh: [], ph: [], fh: [] }
+    if (isAnimal(p)) return out /* the owner's record is never copied to an animal (design 4.5) */
     ;(p.chronic || []).forEach(function (t) { out.kco.push({ t: t, src: 'record' }) })
     ;(p.allergies || []).forEach(function (a) { out.dh.push({ t: 'Allergy: ' + a, src: 'record' }) })
     ;['dh', 'ph', 'fh'].forEach(function (k) { (last[k] || []).forEach(function (t) { out[k].push({ t: t, src: 'last' }) }) })
@@ -461,6 +469,7 @@
   }
   function recAdds() {
     var p = pat(), dr = S.draft, kco = [], al = []
+    if (isAnimal(p)) return { kco: [], al: [], n: 0 } /* never write animal data to the owner's record */
     ;(dr.notes.kco || []).forEach(function (c) { if (!inList(p.chronic, c.t) && !inList(kco, c.t)) kco.push(c.t) })
     ;(dr.notes.dh || []).forEach(function (c) { var a = allergyOf(c.t); a = a.charAt(0).toUpperCase() + a.slice(1); if (a && !inList(p.allergies, a) && !inList(al, a)) al.push(a) })
     return { kco: kco, al: al, n: kco.length + al.length }
@@ -468,6 +477,7 @@
   function recText(w) { return (w.kco.length ? 'K/C/O: ' + w.kco.join(', ') : '') + (w.kco.length && w.al.length ? '; ' : '') + (w.al.length ? 'Allergy: ' + w.al.join(', ') : '') }
   function pfBar() {
     var p = pat(), dr = S.draft, c = { record: 0, last: 0 }
+    if (isAnimal(p)) return '<div class="pfbar" id="pfBar"><div><b>Animal patient:</b> the owner\'s comorbidity, allergies and history are <b>not</b> copied here, and nothing from this prescription is written to the owner\'s record. Owner: ' + esc(ownerOf(p).name) + '.</div></div>'
     Object.keys(dr.notes).forEach(function (k) { dr.notes[k].forEach(function (x) { if (x.src) c[x.src]++ }) })
     var w = recAdds(), vit = Object.keys(dr.vitals).some(function (k) { return dr.vitals[k] })
     return '<div class="pfbar" id="pfBar"><div><b>Pre-filled for this visit:</b> ' + (vit ? 'vitals from check-in' : 'no vitals') + ', ' + c.record + ' from the patient record (comorbidity, allergies), ' + c.last + ' from ' + (p.last ? 'your last visit (' + esc(fmt(p.last.date)) + ', ' + esc(p.last.no) + ': D/H, P/H, F/H)' : 'no earlier visit with you') + '. Edit or remove anything; removing a chip never deletes it from the record.</div>' +
@@ -510,7 +520,7 @@
       return '<li><span class="mr-main">Also on this prescription: line ' + m.n + ' - <b>' + esc(lineName(m.other)) + '</b> (' + esc(m.other.generic) + ')</span></li>'
     }
     var main, pill = '<span class="pill ' + (m.st.on ? 'on' : 'off') + '">' + esc(m.st.text) + '</span>'
-    if (m.rx.byMe) {
+    if (isMine(m.rx)) {
       main = '<b>You</b> prescribed ' + esc(m.m.brand + ' ' + m.m.strength) + ' (' + esc(m.m.generic) + ') &middot; ' + esc(m.sl.pattern) + ' &middot; ' + daysText(m.sl.days) +
         ' &middot; ' + fmt(m.rx.date) + ' (v' + m.rx.version + ')'
     } else { /* D1: another doctor's Rx - generic, strength, frequency, duration, date only. No brand / doctor / notes. */
@@ -544,67 +554,82 @@
 
   /* ---------- top bar / views ---------- */
   function renderTop() {
-    var tabs = [['appointments', 'Appointments'], ['consult', 'Consultation'], ['verify', 'Verify (public)'], ['patient', 'Patient view']]
+    var tabs = [['appointments', 'Appointments'], ['consult', 'Consultation'], ['prx', 'Patient Rx'], ['profile', 'My profile'], ['verify', 'Verify (public)'], ['patient', 'Patient view'], ['pos', 'Pharmacy staff (POS)'], ['guide', 'Guide']]
     $('#topbar').innerHTML = '<div class="brand"><span class="logo">Rx</span><div><strong>PharmaZ247</strong><small>Doctor Portal &middot; prototype</small></div></div>' +
       '<nav aria-label="Main">' + tabs.map(function (t) {
         return '<button class="tab' + (S.view === t[0] ? ' active' : '') + '" data-act="goto" data-v="' + t[0] + '">' + t[1] + '</button>'
-      }).join('') + '</nav><div class="who"><span class="avatar">FI</span><span>' + esc(D.doctor.name) + '</span></div>'
+      }).join('') + '</nav><div class="who">' + (S.view === 'pos' ? '<span class="avatar">RH</span><span>Rakib Hasan (Cashier)</span>' : '<span class="avatar">' + esc(initials(doc().name)) + '</span><span>' + esc(doc().name) + '</span>') + '</div>'
   }
   function render() {
     renderTop(); renderProto()
     document.body.setAttribute('data-ws', S.warnStyle)
     var v = S.view
+    document.body.setAttribute('data-view', v)
     if (v === 'appointments') renderAppointments()
     else if (v === 'consult') renderConsult()
+    else if (v === 'profile') renderProfile()
     else if (v === 'verify') renderVerify()
+    else if (v === 'prx') renderPrx()
+    else if (v === 'pos') renderPos()
+    else if (v === 'ext') renderExt()
+    else if (v === 'guide') renderGuide()
     else renderPatient()
     window.scrollTo(0, 0)
   }
   function renderAppointments() {
-    var rows = D.appointments.map(function (a) {
+    var rows = D.appointments.filter(function (a) { return a.doc === S.doc && (!a.date || a.date === D.today) }).map(function (a) {
       var p = D.patients[a.patientId], done = a.status === 'Done'
       return '<li class="appt"><div class="serial">#' + a.serial + '<small>' + a.time + '</small></div>' +
         '<div class="a-main"><strong>' + esc(p.name) + '</strong> <span class="muted">' + esc(p.age + ' / ' + p.sex) + '</span>' +
         (a.tag ? ' <span class="tag">' + esc(a.tag) + '</span>' : '') +
-        '<div class="muted">' + esc(a.reason) + (p.relation ? ' &middot; ' + esc(p.relation) : '') + '</div></div>' +
+        '<div class="muted">' + esc(a.reason) + (p.relation ? ' &middot; ' + esc(p.relation) : '') + ownerTag(p) + '</div></div>' +
         '<span class="status ' + a.status.toLowerCase() + '">' + a.status + '</span>' +
         '<button class="btn ' + (done ? 'ghost' : 'primary') + '" data-act="' + (done ? 'viewDone' : 'openAppt') + '" data-serial="' + a.serial + '">' + (done ? 'View' : 'Open consultation') + '</button></li>'
     }).join('')
-    $('#view').innerHTML = '<div class="page narrow"><div class="page-h"><div><h1>Today\'s appointments</h1><p class="muted">Wednesday, 21 Oct 2026 &middot; ' + esc(D.doctor.chamber) + '</p></div>' +
-      '<button class="btn ghost" data-act="nyi" data-w="Walk-in registration">+ Add walk-in</button></div><ul class="appts">' + rows + '</ul></div>'
+    $('#view').innerHTML = '<div class="page narrow"><div class="page-h"><div><h1>Today\'s appointments</h1><p class="muted">Wednesday, 21 Oct 2026 &middot; ' + esc(doc().chamber) + '</p></div>' +
+      '<button class="btn ghost" data-act="nyi" data-w="Walk-in registration">+ Add walk-in</button></div>' + (S.welcomeOff ? '' : '<div class="g-welcome" role="region" aria-label="Welcome"><div><strong>New here?</strong> Open the guide - 2-minute tour. It explains this prototype and takes you to each feature.</div><div class="g-wb"><button class="btn primary sm" data-act="gOpen" data-id="start">Open the guide</button><button class="icon-btn" data-act="gWelcomeOff" aria-label="Dismiss the welcome card" title="Dismiss">&times;</button></div></div>') + '<ul class="appts">' + rows + '</ul></div>'
   }
 
   /* ---------- consult skeleton ---------- */
   function renderConsult() {
-    var d = D.doctor, a = appt()
+    var d = doc(), a = appt()
     $('#view').innerHTML = '<div class="consult">' +
-      '<div class="c-head"><div><strong>' + esc(d.name) + '</strong> <span class="muted">' + esc(d.degrees) + ' &middot; BMDC ' + esc(d.bmdc) + '</span></div>' +
-      '<div class="c-meta"><span>' + esc(d.chamber) + '</span><span>' + fmtY(D.today) + '</span><span class="tag">Serial #' + a.serial + '</span><span class="muted">Draft ' + esc(S.draft.rxNo) + '</span></div></div>' +
+      '<div class="c-head"><div><strong>' + esc(d.name) + '</strong> <span class="muted">' + esc(d.degrees) + ' &middot; ' + esc(specLine(d)) + ' &middot; ' + esc(regShort(d)) + '</span></div>' +
+      '<div class="c-meta"><span>' + esc(d.chamber) + '</span><span>' + fmtY(D.today) + '</span><span class="tag">Serial #' + a.serial + '</span><span class="muted">' + (S.draft.editing ? 'Editing ' : 'Draft ') + esc(S.draft.rxNo) + '</span><button class="g-help" data-act="gHelp" data-id="notes" aria-label="Open the user guide" title="Help: open the guide">?</button></div></div>' +
       '<section class="strip" id="strip"></section><div id="banner"></div>' +
       '<div class="c-body"><aside class="notes" id="notes" aria-label="Clinical notes"></aside><section class="rx" id="rx" aria-label="Medicines"></section><aside class="medcheck" id="medcheck" aria-label="Medication check"></aside></div>' +
       '<div class="actionbar" id="bar"></div></div>'
-    renderStrip(); renderBanner(); renderNotes(); renderRx(); renderBar()
+    renderStrip()
+    if (!presOn()) { $('.c-body').innerHTML = '<div class="rx-off blocked" id="presOff"><b>Prescribing is disabled for this doctor</b><p>The platform admin has switched prescribing off for ' + esc(d.name) + ' (error 403, not tied to any field). Existing prescriptions stay readable and printable. Use Prototype controls to switch it back on.</p></div>'; $('#bar').innerHTML = ''; return }
+    renderBanner(); renderNotes(); renderRx(); renderBar()
   }
   function bmi() {
     var v = S.draft.vitals, w = num(v.weight), h = num(v.height) / 100
     return w && h ? (w / (h * h)).toFixed(1) : '-'
   }
   function renderStrip() {
-    var p = pat(), v = S.draft.vitals
+    var p = pat(), v = S.draft.vitals, an = animalOf(p), ow = ownerOf(p)
     function vi(k, label, unit, w) {
       return '<label class="vi"><span>' + label + '</span><span class="vin"><input data-bind="vitals.' + k + '" value="' + esc(v[k]) + '" style="width:' + w + 'em" aria-label="' + label + '"><em>' + unit + '</em></span></label>'
     }
-    $('#strip').innerHTML = '<div class="p-id"><div class="p-name"><strong>' + esc(p.name) + '</strong> <span class="muted">' + esc(p.age + ' / ' + p.sex) + '</span></div>' +
-      '<div class="muted">' + esc(p.phone) + '</div>' + (p.relation ? '<div class="rel">' + esc(p.relation) + ' (family account)</div>' : '') +
-      '<div>' + (p.allergies.length ? p.allergies.map(function (x) { return '<span class="chip allergy">Allergy: ' + esc(x) + '</span>' }).join('') : '<span class="chip grey">No known allergies</span>') + '</div></div>' +
-      '<div class="vitals">' + vi('bp', 'BP', 'mmHg', 5) + vi('pulse', 'Pulse', '/min', 3) + vi('temp', 'Temp', '&deg;F', 4) + vi('weight', 'Weight', 'kg', 3) + vi('height', 'Height', 'cm', 3) +
-      '<div class="vi"><span>BMI</span><span class="vin"><strong id="bmi">' + bmi() + '</strong><em>kg/m&sup2;</em></span></div>' + vi('spo2', 'SpO2', '%', 3) + '<div class="vi-err" id="wErr" role="alert"></div></div>'
+    var idb = an
+      ? '<div class="p-id"><div class="p-name"><strong>' + esc(an.name) + '</strong> <span class="muted">' + esc(animalDesc(an)) + '</span></div><div class="muted">Owner: ' + esc(ow.name) + ' &middot; ' + esc(ow.phone) + '</div>' +
+        '<div><span class="chip vet">For animal use only</span>' + an.features.map(function (x) { return '<span class="chip grey">' + esc(x) + '</span>' }).join('') + '</div></div>'
+      : '<div class="p-id"><div class="p-name"><strong>' + esc(p.name) + '</strong> <span class="muted">' + esc(p.age + ' / ' + p.sex) + '</span></div>' +
+        '<div class="muted">' + esc(p.phone) + '</div>' + (p.relation ? '<div class="rel">' + esc(p.relation) + ' (family account)</div>' : '') +
+        '<div>' + (p.allergies.length ? p.allergies.map(function (x) { return '<span class="chip allergy">Allergy: ' + esc(x) + '</span>' }).join('') : '<span class="chip grey">No known allergies</span>') + '</div></div>'
+    var vit = an
+      ? vi('temp', 'Temp', '&deg;F', 4) + vi('pulse', 'Pulse', '/min', 3) + vi('rr', 'Resp', '/min', 3) + vi('weight', 'Weight', 'kg', 4) + '<div class="vi-n muted small">' + esc(DX.vnorm()) + '</div><div class="vi-err" id="wErr" role="alert"></div>'
+      : vi('bp', 'BP', 'mmHg', 5) + vi('pulse', 'Pulse', '/min', 3) + vi('temp', 'Temp', '&deg;F', 4) + vi('weight', 'Weight', 'kg', 3) + vi('height', 'Height', 'cm', 3) +
+        '<div class="vi"><span>BMI</span><span class="vin"><strong id="bmi">' + bmi() + '</strong><em>kg/m&sup2;</em></span></div>' + vi('spo2', 'SpO2', '%', 3) + '<div class="vi-err" id="wErr" role="alert"></div>'
+    $('#strip').innerHTML = idb + '<div class="vitals">' + vit + '</div>'
     weightErrSync()
   }
 
   /* ---------- continue banner ---------- */
   function renderBanner() {
     var el = $('#banner'), own = ownRxs(), dr = S.draft, c = dr.continued
+    if (!medOn()) { el.innerHTML = ''; return }
     if (c) {
       el.innerHTML = '<div class="cont-chip"><span class="chip teal">Continuing from ' + esc(c.no) + ' (v' + c.version + ') &middot; will be saved as v' + c.next + '</span>' +
         '<button class="link" data-act="undoContinue">Undo (remove copied items)</button><button class="link" data-act="startFresh">Start new</button></div>'
@@ -670,7 +695,7 @@
   }
 
   /* ---------- notes (left panel) ---------- */
-  function allSecDefs() { return D.sections.concat(S.customSecs) }
+  function allSecDefs() { return D.sections.concat(BLOCK_DEFS, S.customSecs) }
   // Built-in sections can be renamed per doctor: the override is laid over the default definition.
   function secDef(id) { var d = allSecDefs().filter(function (s) { return s.id === id })[0], o = S.secOverride[id]; return d && o ? Object.assign({}, d, o) : d }
   function secOn(id) { var c = cfg(id); return !!c && !c.hidden }
@@ -678,7 +703,7 @@
   function renderNotes() {
     keepFocus(function () {
       var vis = S.sections.filter(function (c) { return !c.hidden }), removed = S.sections.length - vis.length
-      $('#notes').innerHTML = '<div class="notes-h"><h2>Clinical notes</h2><span class="notes-ha"><button class="btn ghost sm" data-act="customise">Manage sections</button></span></div>' + pfBar() +
+      $('#notes').innerHTML = '<div class="notes-h"><h2>Clinical notes</h2><span class="notes-ha"><button class="btn ghost sm" data-act="customise">Manage sections</button></span></div>' + tplBar() + pfBar() +
         vis.map(function (c) { return sectionHtml(secDef(c.id), c) }).join('') +
         '<div class="sec-quick"><input class="txt" id="secQuick" placeholder="+ New section: type a name and press Enter" aria-label="Add a new note section"></div>' +
         (removed ? '<p class="muted small">' + removed + ' section' + (removed > 1 ? 's' : '') + ' removed &middot; <button class="link" data-act="customise">restore in Manage sections</button></p>' : '')
@@ -707,8 +732,9 @@
     else if (def.kind === 'tests') body = testsHtml()
     else if (def.kind === 'dx') body = dxHtml()
     else if (def.kind === 'advice') body = adviceHtml()
+    else if (def.kind === 'block') body = blockHtml(def.bid)
     else body = followHtml()
-    var n = def.kind === 'chips' ? dr.notes[id].length + (id === 'oi' ? dr.res.length : 0) : def.kind === 'tests' ? dr.tests.length : def.kind === 'dx' ? dr.dx.length : def.kind === 'advice' ? dr.notes.advice.length + dr.libAdvice.length : 0
+    var n = def.kind === 'block' ? blockCount(def.bid) : def.kind === 'chips' ? dr.notes[id].length + (id === 'oi' ? dr.res.length : 0) : def.kind === 'tests' ? dr.tests.length : def.kind === 'dx' ? dr.dx.length : def.kind === 'advice' ? dr.notes.advice.length + dr.libAdvice.length : 0
     return '<section class="sec' + (cfg.collapsed ? ' collapsed' : '') + '" data-sec="' + id + '"><header class="sec-h">' +
       '<button class="sec-t" data-act="secCollapse" data-sec="' + id + '" aria-expanded="' + !cfg.collapsed + '"><span class="car">&#9662;</span>' + esc(def.title) + ' <abbr>' + def.abbr + '</abbr>' + (n ? '<span class="cnt">' + n + '</span>' : '') + '</button>' +
       '<button class="icon-btn" data-act="secHide" data-sec="' + id + '" title="Remove this section (restore any time from Manage sections)" aria-label="Remove section ' + esc(def.title) + '">&times;</button></header>' +
@@ -783,7 +809,7 @@
       foot: '<button class="btn ghost" data-act="closeModal">Close</button>' })
   }
   function smsText() {
-    var p = pat(), dr = S.draft, f = dr.fu, v = fuVisit(), D0 = D.doctor
+    var p = pat(), dr = S.draft, f = dr.fu, v = fuVisit(), D0 = doc()
     var note = f.note ? (hasBangla(f.note) ? f.note : /report/i.test(f.note) ? 'রিপোর্টসহ আসবেন।' : '') : ''
     return withDig(dr.bnd, function () {
       return 'প্রিয় ' + p.name + ', ' + D0.nameBn + ' আপনাকে ' + bnDate(v) + ' তারিখে' + (f.slot ? ' ' + bn(f.slot.time) + ' টায়' : '') + ' ' + D0.chamberBn + '-এ ফলো-আপের জন্য আসতে বলেছেন। ' + (note ? note + ' ' : '') + 'প্রেসক্রিপশন: ' + dr.rxNo
@@ -880,7 +906,7 @@
     var left = '<div><p class="muted small">Sections on your form (' + on.length + '). Click one to rename it or manage its saved notes.</p><ol class="tpl-list ms-list">' + rows + '</ol>' +
       (removed ? '<p class="muted small ms-sub">Removed sections (' + off.length + ')</p><ol class="tpl-list ms-list">' + removed + '</ol>' : '') + secAddForm() + '</div>'
     openModal({ title: 'Manage note sections', cls: 'wide', body: '<div class="qa-grid">' + left + '<div class="qa-form" id="msPanel">' + msPanel(S.msSel) + '</div></div>',
-      foot: '<button class="btn ghost" data-act="secReset">Reset to default sections</button><button class="btn primary" data-act="closeModal">Done</button>' })
+      foot: '<button class="btn ghost" data-act="secReset">Reset to speciality default</button><button class="btn ghost" data-act="blockPick">+ Add block</button><button class="btn primary" data-act="closeModal">Done</button>' })
   }
   function msPanel(id) {
     var d = id && secDef(id)
@@ -888,7 +914,7 @@
     var top = '<h4>' + esc(d.title) + (d.custom ? ' <em class="ctag">yours</em>' : '') + '</h4><div class="sec-add-r">' +
       '<label class="fld grow"><span>Name</span><input class="txt" data-secname="' + id + '" value="' + esc(d.title) + '"></label>' +
       '<label class="fld"><span>Short label</span><input class="txt abbr-in" data-secabbr="' + id + '" value="' + esc(d.abbr) + '" maxlength="6"></label></div>'
-    if (!hasSaved(d)) return top + '<p class="muted">' + (d.kind === 'tests' ? 'Advised tests use your test templates instead of saved notes.' : 'Follow-up has no saved notes - set it with Days / Weeks / Months.') + '</p>'
+    if (!hasSaved(d)) return top + '<p class="muted">' + (d.kind === 'block' ? blockInfo(d) : d.kind === 'tests' ? 'Advised tests use your test templates instead of saved notes.' : 'Follow-up has no saved notes - set it with Days / Weeks / Months.') + '</p>'
     var list = (S.saved[id] || []).map(function (s, k) {
       return '<li class="ms-note"><input class="txt ms-ntxt" data-noteedit="' + id + '" data-k="' + k + '" value="' + esc(s.t) + '" aria-label="Edit saved note"><small>' + (s.n ? 'used ' + s.n + '&times;' : 'not used yet') + '</small>' +
         '<button class="icon-btn danger-text" data-act="noteDel" data-sec="' + id + '" data-k="' + k + '" aria-label="Delete saved note ' + esc(s.t) + '">&times;</button></li>'
@@ -912,7 +938,7 @@
   }
   function sectionEntryCount(id) {
     var d = secDef(id), dr = S.draft; if (!dr || !d) return 0
-    return d.kind === 'chips' ? (dr.notes[id] || []).length : d.kind === 'tests' ? dr.tests.length : d.kind === 'dx' ? dr.dx.length : d.kind === 'advice' ? dr.notes.advice.length + dr.libAdvice.length : 0
+    return d.kind === 'block' ? blockCount(d.bid) : d.kind === 'chips' ? (dr.notes[id] || []).length : d.kind === 'tests' ? dr.tests.length : d.kind === 'dx' ? dr.dx.length : d.kind === 'advice' ? dr.notes.advice.length + dr.libAdvice.length : 0
   }
   function secRemove(id) {
     var d = secDef(id), n = sectionEntryCount(id)
@@ -1012,10 +1038,11 @@
 
   /* ---------- Rx panel ---------- */
   function renderRx() {
+    if (!medOn()) return renderRxOff()
     keepFocus(function () {
       var dr = S.draft, wc = warnCounts()
       var src = sourceRxs()
-      var checked = src.length ? 'Checked against: ' + src.map(function (r) { return fmt(r.date) + ' (' + (r.byMe ? 'you' : 'another doctor') + ')' }).join(', ') : 'No previous prescriptions found for this patient'
+      var checked = src.length ? 'Checked against: ' + src.map(function (r) { return fmt(r.date) + ' (' + (isMine(r) ? 'you' : 'another doctor') + ')' }).join(', ') : 'No previous prescriptions found for this patient'
       $('#rx').innerHTML = '<div class="rx-h"><h2><span class="rxs">&#8478;</span> Medicines <span class="cnt">' + dr.lines.length + '</span></h2>' +
         '<div class="rx-tools"><button class="btn ghost sm" data-act="openTpl">Apply template</button><button class="btn ghost sm" data-act="saveTpl">Save current as template</button></div></div>' +
         sgInput('med', 'med', 'Search medicine by brand, generic or company - press Enter to add (shortcut: /)') +
@@ -1029,6 +1056,8 @@
         (dr.lines.length ? dr.lines.map(function (l, i) { return lineHtml(l, i, wc.cks[i]) }).join('') : '<div class="empty"><strong>No medicines yet</strong><p>Search above, use Quick add, apply a template' + (ownRxs().length && !dr.continued ? ', or continue from the previous prescription' : '') + '.</p></div>') + ordersHtml()
       renderMedcheck(wc); weightErrSync()
     })
+    if (S.draft.blocks && secOn('b:foodSafety')) blockRefresh('foodSafety')
+    blocksSync()
   }
   function renderMedcheck(wc) {
     var dr = S.draft, el = $('#medcheck')
@@ -1201,7 +1230,7 @@
     sourceRxs().forEach(function (rx) {
       rx.lines.forEach(function (sl) {
         if (sl.stop) return
-        var m = medById(sl.medId), nm = rx.byMe ? m.brand + ' ' + m.strength : m.generic + ' ' + m.strength
+        var m = medById(sl.medId), nm = isMine(rx) ? m.brand + ' ' + m.strength : m.generic + ' ' + m.strength
         if (cur.indexOf(nm) < 0) cur.push(nm)
       })
     })
@@ -1223,16 +1252,16 @@
   /* ---------- Continue previous medicines (PHAR-1718) ---------- */
   // Offers only prescriptions this doctor can read: their own. Another doctor's Rx appears only if the patient shares it (R3/R4) - none are shared in the demo.
   function cpModal() {
-    var own = ownRxs(), hidden = (D.history[S.pid] || []).filter(function (r) { return !r.byMe }).length
+    var own = visibleRxs(S.pid)
     var list = own.map(function (rx) {
-      return '<h4>' + esc(rx.no) + ' &middot; v' + rx.version + ' &middot; ' + fmtY(rx.date) + '</h4><ul class="tpl-list">' + rx.lines.map(function (hl, k) {
+      return '<h4>' + esc(rx.no) + ' &middot; v' + rx.version + ' &middot; ' + fmtY(rx.date) + (isMine(rx) ? '' : ' &middot; <span class="tag shared">shared by patient</span>') + '</h4><ul class="tpl-list">' + rx.lines.map(function (hl, k) {
         if (hl.stop) return ''
         var m = medById(hl.medId), added = S.draft.lines.some(function (x) { return x.medId === hl.medId && x.cf === rx.id })
         return '<li><div><strong>' + esc(m.brand + ' ' + m.strength) + '</strong><small>' + esc(m.generic) + ' &middot; ' + esc(hl.steps ? hl.steps.length + ' steps' : hl.pattern) + ' &middot; ' + daysText(hl.days) + '</small></div>' +
           '<button class="btn sm ' + (added ? 'ghost' : 'primary') + '" data-act="cpAdd" data-rx="' + rx.id + '" data-k="' + k + '"' + (added ? ' disabled' : '') + '>' + (added ? 'Added' : 'Continue') + '</button></li>'
       }).join('') + '</ul>'
     }).join('')
-    openModal({ title: 'Continue previous medicines', body: '<p class="muted small">Copies a medicine with its schedule (you can edit it) marked &ldquo;চলবে / Continue&rdquo;. It is dispensed like any other line. Only prescriptions you can read are listed: your own' + (hidden ? '; ' + hidden + ' prescription' + (hidden > 1 ? 's' : '') + ' by another doctor ' + (hidden > 1 ? 'are' : 'is') + ' not shared by the patient' : '') + '.</p>' +
+    openModal({ title: 'Continue previous medicines', body: '<p class="muted small">Copies a medicine with its schedule (you can edit it) marked &ldquo;চলবে / Continue&rdquo;. It is dispensed like any other line. Only prescriptions you can read are listed: your own, and another doctor&rsquo;s only when the patient has shared it with you. Anything not shared does not appear here.</p>' +
       (list || '<div class="empty"><strong>Nothing to continue</strong><p>No earlier prescription by you for this patient.</p></div>'),
       foot: '<button class="btn primary" data-act="closeModal">Done</button>' })
   }
@@ -1244,7 +1273,7 @@
       (wc.w ? ' &middot; <span class="warn-t2">&#9888; ' + wc.w + ' warning' + (wc.w > 1 ? 's' : '') + ' (' + wc.a + ' acknowledged)</span>' : '') +
       (ac.w ? ' &middot; <span class="err-t">&#9888; ' + ac.w + ' allergy warning' + (ac.w > 1 ? 's' : '') + ' (' + ac.a + ' with override reason)</span>' : '') +
       '<span class="muted small">' + (S.savedAt ? ' &middot; Draft saved ' + S.savedAt : ' &middot; Not saved yet') + '</span></div>' +
-      '<div class="bar-a"><button class="btn ghost" data-act="saveDraft">Save draft</button><button class="btn" data-act="preview">Preview</button><button class="btn primary" data-act="complete">Complete</button></div>'
+      '<div class="bar-a"><button class="btn ghost" data-act="saveDraft">Save draft</button><button class="btn" data-act="preview">Preview</button><button class="btn primary" data-act="complete">' + (dr.editing ? 'Save edit' : 'Complete') + '</button></div>'
   }
   function tplModal() {
     var T = S.tplTab, tabs = [['condition', 'Condition templates'], ['combos', 'Saved combinations'], ['presets', 'Single-medicine presets']]
@@ -1525,7 +1554,7 @@
     return li ? '<div class="xo sh-adv"><b>রেফারেল, ভর্তি ও সার্টিফিকেট / Referral, admission, certificate</b><ul>' + li + '</ul></div>' : ''
   }
   function docHtml(k, o, c) {
-    var d = D.doctor, p = c.p, title, body, suffix = { ref: 'R', adm: 'A', cert: 'C' }[k], no = c.no + '-' + suffix, code = codeFor(c.no)
+    var d = doc(), p = c.p, title, body, suffix = { ref: 'R', adm: 'A', cert: 'C' }[k], no = c.no + '-' + suffix, code = codeFor(c.no)
     function row(l, v) { return v ? '<div class="doc-r"><b>' + l + '</b><span>' + v + '</span></div>' : '' }
     if (k === 'ref') {
       title = 'রেফারেল পত্র / Referral letter'
@@ -1546,11 +1575,11 @@
           '<p class="bn-p">উপরোক্ত রোগী ' + (r ? fmtY(r.from) : '') + ' থেকে স্বাভাবিক কাজে ফিরতে সক্ষম।</p>'
       body += row(o.ctype === 'rest' ? 'Remarks' : 'Restrictions', esc(o.remarks))
     }
-    return '<div class="sheet doc"><div class="sh-head"><div><h2>' + esc(d.name) + '</h2><div>' + esc(d.degrees) + ' &middot; ' + esc(d.speciality) + '</div><div>BMDC Reg. No. ' + esc(d.bmdc) + '</div></div>' +
+    return '<div class="sheet doc"><div class="sh-head"><div><h2>' + esc(d.name) + '</h2><div>' + esc(d.degrees) + ' &middot; ' + esc(specLine(d)) + '</div><div>' + esc(regLine(d)) + '</div></div>' +
       '<div class="sh-r"><div>' + esc(d.chamber) + '</div><div>' + esc(d.chamberAddr) + '</div><div>Phone: ' + esc(d.phone) + '</div></div></div>' +
       '<div class="sh-pat"><span><b>' + esc(p.name) + '</b>, ' + esc(p.age) + ' / ' + esc(p.sex) + '</span><span>Date: ' + fmtY(c.date) + '</span><span>Ref: ' + esc(no) + '</span></div>' +
       '<h3 class="doc-t">' + title + '</h3><div class="doc-b">' + body + '</div>' +
-      '<div class="sh-foot"><div class="sh-qr">' + qrHtml(no + code) + '<div><div class="chkcode">Check code: ' + code + '</div><small>Linked to prescription ' + esc(c.no) + '</small></div></div><div class="sig"><div class="sigline"></div>' + esc(d.name) + '<br>BMDC ' + esc(d.bmdc) + '</div></div></div>'
+      '<div class="sh-foot"><div class="sh-qr">' + qrHtml(no + code) + '<div><div class="chkcode">Check code: ' + code + '</div><small>Linked to prescription ' + esc(c.no) + '</small></div></div><div class="sig"><div class="sigline"></div>' + esc(d.name) + '<br>' + esc(regShort(d)) + '</div></div></div>'
   }
   function docModal(k, o, c) {
     openModal({ title: { ref: 'Referral letter', adm: 'Admission advice', cert: 'Medical certificate' }[k], cls: 'wide', body: '<div class="sheet-wrap">' + docHtml(k, o, c) + '</div>',
@@ -1620,7 +1649,7 @@
     return h
   }
   function sheetHtml0(final) {
-    var d = D.doctor, p = pat(), dr = S.draft, left = ''
+    var d = doc(), p = pat(), dr = S.draft, left = ''
     S.sections.forEach(function (c) {
       if (c.hidden) return
       var def = secDef(c.id), t = ''
@@ -1628,10 +1657,11 @@
       if (def.kind === 'chips') t = dr.notes[c.id].map(function (x) { return esc(x.t) }).join('; ')
       if (def.kind === 'tests') t = dr.tests.map(function (x) { return esc(x.t) }).join(', ')
       if (def.kind === 'dx') t = dr.dx.map(function (x) { return esc(x.t) + ' <i>(' + DX_TYPES[x.type].charAt(0) + ')</i>' }).join('; ')
+      if (def.kind === 'block') t = blockPrintHtml(def.bid)
       if (c.id === 'oe') {
         var v = dr.vitals, vt = []
         if (v.bp) vt.push('BP ' + esc(v.bp)); if (v.pulse) vt.push('Pulse ' + esc(v.pulse)); if (v.temp) vt.push('Temp ' + esc(v.temp) + '&deg;F')
-        if (v.weight) vt.push('Wt ' + esc(v.weight) + ' kg'); if (bmi() !== '-') vt.push('BMI ' + bmi()); if (v.spo2) vt.push('SpO2 ' + esc(v.spo2) + '%')
+        if (v.rr) vt.push('Resp ' + esc(v.rr) + '/min'); if (v.weight) vt.push('Wt ' + esc(v.weight) + ' kg'); if (bmi() !== '-') vt.push('BMI ' + bmi()); if (v.spo2) vt.push('SpO2 ' + esc(v.spo2) + '%')
         t = (vt.join(' &middot; ') + (t ? '<br>' + t : ''))
       }
       if (c.id === 'oi' && dr.res.length) t += (t ? '<br>' : '') + dr.res.map(resPrint).join('<br>')
@@ -1646,12 +1676,12 @@
       dr.notes.advice.map(function (x) { return '<li>' + esc(x.t) + '</li>' }).join('')
     var fu = !secOn('fu') ? '' : fuSheet()
     var code = final ? final.code : 'XXXX-XXXX'
-    return '<div class="sheet"><div class="sh-head"><div><h2>' + esc(d.name) + '</h2><div>' + esc(d.degrees) + ' &middot; ' + esc(d.speciality) + '</div><div>BMDC Reg. No. ' + esc(d.bmdc) + '</div></div>' +
+    return '<div class="sheet"><div class="sh-head"><div><h2>' + esc(d.name) + '</h2><div>' + esc(d.degrees) + ' &middot; ' + esc(specLine(d)) + '</div><div>' + esc(regLine(d)) + '</div></div>' +
       '<div class="sh-r"><div>' + esc(d.chamber) + '</div><div>' + esc(d.chamberAddr) + '</div><div>Phone: ' + esc(d.phone) + '</div></div></div>' +
-      '<div class="sh-pat"><span><b>' + esc(p.name) + '</b>, ' + esc(p.age) + ' / ' + esc(p.sex) + (p.relation ? ' (' + esc(p.relation) + ')' : '') + '</span><span>Date: ' + fmtY(D.today) + '</span><span>Rx No: ' + esc(dr.rxNo) + (dr.continued ? ' (v' + dr.continued.next + ')' : '') + '</span></div>' +
-      '<div class="sh-cols"><div class="sh-l">' + (left || '<span class="muted">No notes</span>') + '</div><div class="sh-rx"><div class="rxs big">&#8478;</div><ol>' + (meds || '<li class="muted">No medicines</li>') + '</ol></div></div>' +
-      ordBlock(dr.orders) + refBlock(dr) + (adv ? '<div class="sh-adv"><b>Adv / পরামর্শ</b><ul>' + adv + '</ul></div>' : '') + (fu ? '<div class="sh-fu">' + fu + '</div>' : '') +
-      '<div class="sh-foot"><div class="sh-qr">' + qrHtml(dr.rxNo + code) + '<div><div class="chkcode">Check code: ' + code + '</div><small>Verify at pharmaz247.example/verify</small></div></div><div class="sig"><div class="sigline"></div>' + esc(d.name) + '<br>BMDC ' + esc(d.bmdc) + '</div></div></div>'
+      sheetTitle() + '<div class="sh-pat">' + patSpan(p) + '<span>Date: ' + fmtY(D.today) + '</span><span>Rx No: ' + esc(dr.rxNo) + (dr.continued ? ' (v' + dr.continued.next + ')' : '') + '</span></div>' +
+      '<div class="sh-cols"><div class="sh-l">' + (left || '<span class="muted">No notes</span>') + '</div><div class="sh-rx"><div class="rxs big">&#8478;</div>' + rxLabelHtml() + '<ol>' + (meds || (medOn() ? '<li class="muted">No medicines</li>' : planLis())) + '</ol></div></div>' +
+      (medOn() ? ordBlock(dr.orders) : '') + refBlock(dr) + (adv ? '<div class="sh-adv"><b>Adv / পরামর্শ</b><ul>' + adv + '</ul></div>' : '') + (fu ? '<div class="sh-fu">' + fu + '</div>' : '') +
+      '<div class="sh-foot"><div class="sh-qr">' + qrHtml(dr.rxNo + code) + '<div><div class="chkcode">Check code: ' + code + '</div><small>Verify at pharmaz247.example/verify</small></div></div><div class="sig"><div class="sigline"></div>' + esc(d.name) + '<br>' + esc(regShort(d)) + '</div></div></div>'
   }
   function previewModal() {
     var dr = S.draft, hs = histSkipped()
@@ -1663,7 +1693,8 @@
   function completeModal() {
     var dr = S.draft, wc = warnCounts(), own = ownRxs(), ac = allergyCounts()
     var chain
-    if (dr.continued) chain = own.slice().reverse().map(function (r) { return 'v' + r.version + ' ' + fmt(r.date) }).join(' &rarr; ') + ' &rarr; <b>v' + dr.continued.next + ' today</b>'
+    if (dr.editing) chain = 'Edit of <b>' + esc(dr.rxNo) + '</b> in place (same number and version). The check code changes; copies printed earlier show &ldquo;Not valid &ndash; changed&rdquo;. The edit window does not restart.'
+    else if (dr.continued) chain = own.slice().reverse().map(function (r) { return 'v' + r.version + ' ' + fmt(r.date) }).join(' &rarr; ') + ' &rarr; <b>v' + dr.continued.next + ' today</b>'
     else chain = 'New prescription - <b>v1 today</b>' + (own.length ? ' (not linked to your earlier prescriptions)' : '')
     var un = wc.w - wc.a, wb = recAdds()
     openModal({ title: 'Complete prescription', cls: 'sm', body: '<ul class="sum"><li><b>' + dr.lines.length + '</b> medicines, <b>' + dr.tests.length + '</b> advised tests</li>' +
@@ -1673,7 +1704,7 @@
       '<li>Warnings: <b>' + wc.a + ' of ' + wc.w + '</b> acknowledged' + (un ? ' <span class="warn-t2">(' + un + ' not acknowledged - you can still complete)</span>' : '') + '</li>' +
       (dr.res.length ? '<li><b>' + dr.res.length + '</b> report result(s) printed under O/I</li>' : '') +
       (wb.n ? '<li>Patient record: will <b>add</b> ' + esc(recText(wb)) + ' <span class="muted small">(add-only; nothing is removed from the record)</span></li>' : '') +
-      '<li>Version chain: ' + chain + '</li></ul><p class="note">Previous prescriptions stay unchanged and valid. Completing makes this prescription final; later changes create a new version.</p>',
+      '<li>Version chain: ' + chain + '</li></ul><p class="note">Previous prescriptions stay unchanged and valid. ' + (dr.editing ? 'Saving replaces the issued content; the patient sees the latest version only.' : 'Completing makes this prescription final; later changes create a new version.') + '</p>',
       foot: '<button class="btn ghost" data-act="closeModal">Back</button><button class="btn primary" data-act="confirmComplete">Confirm and issue</button>' })
   }
   function advList() {
@@ -1688,6 +1719,7 @@
       if (def.kind === 'chips') items = dr.notes[c.id].map(function (x) { return x.t })
       else if (def.kind === 'tests') items = dr.tests.map(function (t) { return t.t })
       else if (def.kind === 'dx') items = dr.dx.map(function (x) { return x.t + ' (' + DX_TYPES[x.type] + ')' })
+      else if (def.kind === 'block') items = blockItems(def.bid)
       else return
       if (items.length || (c.id === 'oi' && dr.res.length)) secs.push({ abbr: def.kind === 'tests' ? 'Exam / Inv' : def.abbr, title: def.kind === 'tests' ? 'Tests advised' : def.title, items: items })
     })
@@ -1699,8 +1731,10 @@
   }
   function confirmComplete() {
     var dr = S.draft, no = dr.rxNo, code = codeFor(no), own = ownRxs(), wb = recAdds()
-    var version = dr.continued ? dr.continued.next : 1
-    var rec = { id: 'rx' + S.rxCounter, no: no, version: version, date: D.today, byMe: true,
+    var ed = dr.editing ? rxById(dr.editing) : null
+    if (ed && !editOpen(ed)) { closeModal(); return toast('Edit window closed - ' + closedText(ed)) }
+    var version = ed ? ed.version : dr.continued ? dr.continued.next : 1
+    var rec = { id: 'rx' + S.rxCounter, no: no, version: version, date: D.today, submittedAt: nowIso(), serial: S.serial, byMe: true, by: S.doc, animalId: pat().animalId || null,
       lines: dr.lines.map(function (l) {
         if (isStop(l)) return { stop: true, kind: 'STOP', medId: l.medId, name: lineName(l), reason: l.stopReason, pattern: '', days: 0, food: 'any' }
         var many = stepped(l), last = stepsOf(l)[stepsOf(l).length - 1], off = startOffset(l)
@@ -1709,14 +1743,16 @@
       }).filter(function (x, i) { return !dr.lines[i].free || isStop(dr.lines[i]) }),
       tests: dr.tests.map(function (t) { return t.t }), cc: dr.notes.cc.map(function (x) { return x.t }), dx: dr.dx, advice: [], follow: followDate() }
     rec.advice = advList(); rec.bnd = dr.bnd; rec.snap = snapOf(dr); rec.fuRec = fuRecOf(dr)
+    rec.draftJson = JSON.stringify(dr) /* full draft (notes, blocks, vitals, free lines, extras...) so an edit round-trips losslessly */
     Object.assign(rec, copyExtras(dr))
     /* D8 write-back (simulated): add-only, same transaction as the issue. Next visit pre-fills from this Rx. */
     var pp = pat()
     pp.chronic = (pp.chronic || []).concat(wb.kco); pp.allergies = pp.allergies.concat(wb.al)
     function plain(k, nf) { return dr.notes[k].map(function (x) { return x.t }).filter(function (t) { return !nf || !allergyOf(t) }) }
     pp.last = { date: D.today, no: no, dh: plain('dh', true), ph: plain('ph'), fh: plain('fh') }
+    if (ed) return finishEdit(ed, rec)
     ;(D.history[S.pid] = D.history[S.pid] || []).push(rec)
-    D.verifyDb.push({ no: no, code: code, status: 'VALID', issued: fmtY(D.today), doctor: D.doctor.name, bmdc: D.doctor.bmdc, patient: pat().name.charAt(0) + '*** ' + (pat().name.split(' ')[1] || '').charAt(0) + '*****',
+    D.verifyDb.push({ no: no, code: code, status: 'VALID', issued: fmtY(D.today), doctor: doc().name, bmdc: doc().bmdc, patient: pat().name.charAt(0) + '*** ' + (pat().name.split(' ')[1] || '').charAt(0) + '*****',
       meds: dr.lines.map(function (l) { return isStop(l) ? 'STOP: ' + lineName(l) : lineName(l) + ' - ' + doseText(l) + ' - ' + durText(l).toLowerCase() + (infOn(l) ? ' - ' + infEn(l) : '') }) })
     var old = own[0]
     if (old) D.verifyDb.forEach(function (r) { if (r.no === old.no) r.newer = fmtY(D.today) })
@@ -1724,7 +1760,7 @@
     S.lastIssued = { no: no, code: code, version: version }
     S.rxCounter++
     openModal({ title: 'Prescription issued', cls: 'sm', body: '<div class="success"><div class="tick">&#10003;</div><h3>' + esc(no) + ' &middot; v' + version + '</h3><p class="muted">Issued ' + fmtY(D.today) + ' for ' + esc(pat().name) + '</p>' +
-      qrHtml(no + code) + '<div class="chkcode">Check code: ' + code + '</div></div>' + (wb.n ? '<div class="note">Added to the patient record: ' + esc(recText(wb)) + '</div>' : '') + '<div class="muted small">' + (dr.fu.rem && num(dr.fu.n) ? 'Reminder SMS scheduled for ' + esc(fmtY(fuSendOn())) + ' (simulated).' : '') + '</div>',
+      qrHtml(no + code) + '<div class="chkcode">Check code: ' + code + '</div></div>' + (wb.n ? '<div class="note">Added to the patient record: ' + esc(recText(wb)) + '</div>' : '') + '<div class="note">Patient SMS (simulated): the link opens the prescription only after the patient signs in with phone + OTP. Editable for ' + leftText(leftMin(rec)) + '.</div>' + '<div class="muted small">' + (dr.fu.rem && num(dr.fu.n) ? 'Reminder SMS scheduled for ' + esc(fmtY(fuSendOn())) + ' (simulated).' : '') + '</div>',
       foot: '<button class="btn ghost" data-act="verifyThis">Open in Verify page</button><button class="btn primary" data-act="backToAppts">Back to appointments</button>' })
   }
 
@@ -1745,6 +1781,7 @@
   }
   function verifyLookup(no, code) {
     no = no.trim().toUpperCase(); code = code.trim().toUpperCase()
+    if (S.retired.some(function (x) { return x.no === no && x.code === code })) return { s: 'CHANGED', rec: { issued: fmtY(D.today) } } /* PHAR-1710: the code was retired by an edit */
     var rec = D.verifyDb.filter(function (r) { return r.no === no })[0]
     if (!rec || rec.code !== code) return { s: 'NOT_FOUND' } /* wrong code looks exactly like unknown Rx */
     return { s: rec.status, rec: rec }
@@ -1767,7 +1804,7 @@
   /* ---------- patient view ---------- */
   function pBtn(rx) { return function (k, o) { return ' <button class="link" data-act="pDoc" data-rx="' + rx.id + '" data-k="' + k + '" data-id="' + o.id + '">View / print</button>' } }
   function renderPatient() {
-    var rx0 = S.pv && (D.history.p1 || []).filter(function (r) { return r.id === S.pv })[0]
+    var rx0 = S.pv && (D.history[S.pvPid || 'p1'] || []).filter(function (r) { return r.id === S.pv })[0]
     withDig(S.pvDig === null ? !rx0 || rx0.bnd !== false : S.pvDig, renderPatient0)
   }
   var FU_BN = { days: 'দিন', weeks: 'সপ্তাহ', months: 'মাস' }
@@ -1799,12 +1836,12 @@
     }).join('')
     return rows ? '<div class="pnotes"><h4>Clinical notes</h4><p class="muted small">Everything your doctor wrote for this visit.</p>' + rows + '</div>' : ''
   }
-  function renderPatient0() {
-    var pid = 'p1', list = (D.history[pid] || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : -1 }), body
+  function patientRxBody(pid) {
+    var list = (D.history[pid] || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : -1 }), body
     if (S.pv) {
       var rx = list.filter(function (r) { return r.id === S.pv })[0], code = codeFor(rx.no)
-      body = '<button class="link" data-act="pBack">&larr; All prescriptions</button><h3>' + esc(rx.no) + '</h3><p class="muted">' + fmtY(rx.date) + ' &middot; ' + (rx.byMe ? esc(D.doctor.name) : 'Dr. Imran Hossain') + '</p>' +
-        '<div class="pv-tools"><div class="seg" role="group" aria-label="Digits"><button class="' + (DIG ? 'on' : '') + '" data-act="pvDig" data-v="1">বাংলা ১২৩</button><button class="' + (DIG ? '' : 'on') + '" data-act="pvDig" data-v="0">123</button></div> <button class="btn sm ghost" data-act="pPdf">Download PDF</button></div>' + pNotes(rx) +
+      body = (S.smsRx ? '' : '<button class="link" data-act="pBack">&larr; All prescriptions</button>') + '<h3>' + esc(rx.no) + '</h3><p class="muted">' + fmtY(rx.date) + ' &middot; ' + esc(docNameOf(rx)) + '</p>' +
+        pvInfo(rx) + '<div class="pv-tools"><div class="seg" role="group" aria-label="Digits"><button class="' + (DIG ? 'on' : '') + '" data-act="pvDig" data-v="1">বাংলা ১২৩</button><button class="' + (DIG ? '' : 'on') + '" data-act="pvDig" data-v="0">123</button></div> <button class="btn sm ghost" data-act="pPdf">Download PDF</button>' + (S.smsRx ? '' : ' <button class="btn sm primary" data-act="shareOpen" data-id="' + rx.id + '">Share&hellip;</button>') + '</div>' + pNotes(rx) +
         '<ul class="pmeds">' + rx.lines.map(function (l) {
           if (l.stop) return '<li class="pstop"><b>বন্ধ করুন / STOP: ' + esc(l.name) + '</b>' + (l.reason ? '<span>' + esc(l.reason) + '</span>' : '') + '</li>'
           var m = medById(l.medId), x = l.x || {}
@@ -1814,23 +1851,33 @@
         }).join('') + '</ul>' + ordBlock(rx.orders) + refBlock(rx, pBtn(rx)) + (rx.advice.length ? '<h4>পরামর্শ / Advice</h4><ul>' + rx.advice.map(function (a) { return '<li>' + esc(a) + '</li>' }).join('') + '</ul>' : '') +
         fuPatient(rx) + '<div class="qr-box">' + qrHtml(rx.no + code) + '<div class="chkcode">Check code: ' + code + '</div></div>'
     } else {
-      body = '<h3>My prescriptions</h3>' + list.map(function (r) {
-        return '<button class="pcard" data-act="pOpen" data-id="' + r.id + '"><b>' + esc(r.no) + '</b><span>' + fmtY(r.date) + ' &middot; ' + r.lines.length + ' medicines</span><small>' + (r.byMe ? esc(D.doctor.name) : 'Dr. Imran Hossain') + '</small></button>'
+      body = (pid === 'p1' ? '<h3>My prescriptions</h3><p class="muted small">Everything your doctors submitted for you. Drafts are never shown.</p>' : '<h3>Prescriptions for ' + esc(D.patients[pid].name) + '</h3><button class="link" data-act="pTab" data-t="rx">&larr; All my prescriptions</button><p class="muted small">Animal patient &middot; owner ' + esc(D.patients[D.patients[pid].owner].name) + '</p>') + (list.length ? '' : '<div class="empty slim">None yet.</div>') + list.map(function (r) {
+        return '<button class="pcard" data-act="pOpen" data-id="' + r.id + '"><b>' + esc(r.no) + '</b><span>' + fmtY(r.date) + ' &middot; ' + r.lines.length + ' medicines</span><small>' + esc(docNameOf(r)) + pcardExtra(r) + '</small></button>'
       }).join('')
     }
-    $('#view').innerHTML = '<div class="page"><div class="page-h"><div><h1>Patient view</h1><p class="muted">Customer portal - prescription detail for Rahima Begum (mobile frame).</p></div></div>' +
-      '<div class="phone"><div class="ph-bar">portal.pharmaz247.example</div><div class="ph-b">' + body + '</div></div></div>'
+    return body
+  }
+  function renderPatient0() {
+    var tabs = [['rx', 'Prescriptions'], ['find', 'Find a doctor'], ['animals', 'My animals'], ['appts', 'Appointments'], ['sms', 'SMS (simulated)']], body
+    if (S.smsRx) body = smsLinkBody()
+    else if (S.pvTab === 'sms') body = smsHtml()
+    else if (S.pv || S.pvTab === 'rx') body = patientRxBody(S.pvPid || 'p1')
+    else if (S.pvTab === 'find') body = findHtml()
+    else if (S.pvTab === 'animals') body = animalsHtml()
+    else body = custApptsHtml()
+    $('#view').innerHTML = '<div class="page"><div class="page-h"><div><h1>Patient view</h1><p class="muted">Customer portal - Rahima Begum (mobile frame).</p></div></div>' +
+      '<div class="phone"><div class="ph-bar">portal.pharmaz247.example</div><div class="ph-b"><nav class="pnav" aria-label="Portal">' + tabs.map(function (t) { return '<button class="pn' + (S.pvTab === t[0] ? ' on' : '') + '" data-act="pTab" data-t="' + t[0] + '">' + t[1] + '</button>' }).join('') + '</nav>' + body + '</div></div></div>'
   }
 
   /* ---------- prototype panel ---------- */
   function renderProto() {
     var el = $('#proto')
     if (!S.protoOpen) { el.innerHTML = '<button class="p-toggle" data-act="ptoggle">Prototype controls</button>'; return }
-    el.innerHTML = '<div class="p-h"><strong>Prototype controls</strong><button class="icon-btn" data-act="ptoggle" aria-label="Collapse">&minus;</button></div><p class="muted small">Not part of the product.</p>' +
-      '<fieldset><legend>Scenario</legend>' + [['returning', 'Returning patient'], ['first', 'First visit'], ['family', 'Family member']].map(function (s) {
+    el.innerHTML = '<div class="p-h"><strong>Prototype controls</strong><button class="icon-btn" data-act="ptoggle" aria-label="Collapse">&minus;</button></div><p class="muted small">Not part of the product.</p>' + docFieldset() +
+      '<fieldset' + (S.doc === 'd1' ? '' : ' class="hid"') + '><legend>Scenario (Dr. Farhana)</legend>' + [['returning', 'Returning patient'], ['first', 'First visit'], ['family', 'Family member']].map(function (s) {
         return '<label><input type="radio" name="scen" data-act="scen" value="' + s[0] + '"' + (S.scenario === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>'
       }).join('') + '</fieldset>' +
-      '<fieldset><legend>Warning style</legend>' + [['inline', 'A. Inline card'], ['panel', 'B. Side panel'], ['popup', 'C. Pop-up on add']].map(function (s) {
+      protoClock() + '<fieldset><legend>Warning style</legend>' + [['inline', 'A. Inline card'], ['panel', 'B. Side panel'], ['popup', 'C. Pop-up on add']].map(function (s) {
         return '<label><input type="radio" name="ws" data-act="wstyle" value="' + s[0] + '"' + (S.warnStyle === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>'
       }).join('') + '</fieldset><button class="btn sm ghost" data-act="reset">Reset demo data</button>'
   }
@@ -1860,7 +1907,7 @@
         out.push({ v: o.s.t, html: esc(o.s.t) + '<em class="tg ' + (tag === 'used before' ? 'plain' : '') + '">' + tag + '</em>' })
       })
     out = out.slice(0, 6)
-    ;(D.commonPhrases[key] || []).forEach(function (t) { if (out.length < 8 && have.indexOf(t.toLowerCase()) < 0 && t.toLowerCase().indexOf(q) >= 0) out.push({ v: t, html: esc(t) + '<em class="tg plain">common</em>' }) })
+    ;seedPhrases(key).concat(D.commonPhrases[key] || []).forEach(function (t) { if (out.length < 8 && have.indexOf(t.toLowerCase()) < 0 && t.toLowerCase().indexOf(q) >= 0) out.push({ v: t, html: esc(t) + '<em class="tg plain">common</em>' }) })
     if (q && !out.some(function (o) { return o.v.toLowerCase() === q })) {
       var V = q.charAt(0).toUpperCase() + q.slice(1), sec = secDef(key)
       out.push({ v: V, html: 'Add &ldquo;' + esc(q) + '&rdquo;<small>this prescription only</small>' })
@@ -1910,11 +1957,16 @@
   var A = {
     goto: function (e) {
       var v = e.getAttribute('data-v')
-      if (v === 'consult' && !S.draft) return openForScenario('returning')
+      if (v === 'consult' && !S.draft) return openFirst()
       S.view = v; render()
     },
     openAppt: function (e) { var s = +e.getAttribute('data-serial'); var a = D.appointments.filter(function (x) { return x.serial === s })[0]; openConsult(a.patientId, s) },
-    viewDone: function () { nyi('Completed visit summary') },
+    viewDone: function (e) {
+      var sr = +e.getAttribute('data-serial'), a = D.appointments.filter(function (x) { return x.serial === sr })[0]
+      var rx = a && (D.history[a.patientId] || []).filter(function (r) { return r.serial === sr && isMine(r) })[0]
+      if (!rx) return nyi('Completed visit summary')
+      rxDrawer(rx.id)
+    },
     nyi: function (e) { nyi(e.getAttribute('data-w')) },
     backdrop: function (e, ev) { if (ev.target === e) closeModal() },
     closeModal: closeModal,
@@ -1946,7 +1998,7 @@
     secUp: function (e) { moveSec(+e.getAttribute('data-i'), -1) },
     secDown: function (e) { moveSec(+e.getAttribute('data-i'), 1) },
     secReset: function () {
-      S.sections = D.sections.map(function (s) { return { id: s.id, hidden: false, collapsed: false } })
+      S.sections = tplSections(S.tplCode)
       var at = S.sections.findIndex(function (c) { return c.id === 'tests' })
       S.customSecs.forEach(function (d, k) { S.sections.splice(at + k, 0, { id: d.id, hidden: false, collapsed: false }) }) /* own sections are kept */
       S.secOverride = {}; renderNotes(); renderBar(); customiseModal(); toast('Default sections, names and order restored - your own sections are kept')
@@ -2107,7 +2159,7 @@
     },
     saveDraft: function () { var d = new Date(); S.savedAt = pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2); renderBar(); toast('Draft saved') },
     preview: previewModal, complete: function () {
-      if (!S.draft.lines.length && !hasExtras(S.draft)) return toast('Add at least one medicine or order to complete')
+      if (medOn() ? (!S.draft.lines.length && !hasExtras(S.draft)) : !hasContent()) return toast(medOn() ? 'Add at least one medicine or order to complete' : 'Add at least one note, order or advice to complete')
       var errs = validateRx()
       if (errs.length) { S.showErr = true; if (S.modal) { S.modal = null; $('#modalRoot').innerHTML = '' } renderRx(); renderNotes(); weightErrSync(); toast(errs[0] + (errs.length > 1 ? ' (+' + (errs.length - 1) + ' more)' : '')); var f1 = $('.fld-err, input.err'); if (f1) f1.scrollIntoView({ block: 'center', behavior: 'smooth' }); return }
       S.showErr = false; completeModal()
@@ -2168,6 +2220,538 @@
     },
     reset: function () { window.location.reload() }
   }
+  /* ================= WAVE 4: doctor, speciality, practitioner type, block library, animals (PHAR-1701..1708) ================= */
+  var BL = {}, SPEC = {}, DOCS = {}
+  D.specCat.forEach(function (s) { SPEC[s.code] = s })
+  D.doctors.forEach(function (d) { DOCS[d.id] = d })
+  function parseField(s) {
+    var m = /^([^:]+):([a-z]+)(?:\((.*)\))?$/.exec(s), label = m ? m[1] : s, t = m ? m[2] : 't', arg = m && m[3] ? m[3] : ''
+    var pl = label.replace(/\s*\(.*?\)/g, '')
+    var key = pl.toLowerCase().replace(/[^a-z0-9]+(.)?/g, function (x, c) { return c ? c.toUpperCase() : '' })
+    return { k: key, l: label, pl: pl, t: t, u: t === 'n' ? arg : '', o: t === 's' || t === 'm' ? arg.split(',') : [], fn: t === 'x' ? arg : '' }
+  }
+  D.blockLib.forEach(function (b) {
+    b.title = D.blockTitles[b.id] || b.id.charAt(0).toUpperCase() + b.id.slice(1).replace(/([A-Z])/g, ' $1').toLowerCase()
+    b.fields = b.f.split(';').map(parseField); BL[b.id] = b
+  })
+  var BLOCK_DEFS = D.blockLib.map(function (b) { return { id: 'b:' + b.id, title: b.title, abbr: b.title, kind: 'block', bid: b.id } })
+
+  function doc() { return DOCS[S.doc] }
+  function specName(c) { return SPEC[c] ? SPEC[c].name : c }
+  function typeOf(d) { return (SPEC[d.spec] || SPEC.OTHER).type }
+  function ptype(d) { return D.practTypes[typeOf(d || doc())] }
+  function specLine(d) { return [specName(d.spec)].concat((d.sec || []).map(specName)).join(', ') }
+  function regShort(d) { return (d.regBody === 'BMDC' || d.regBody === 'BVC' ? d.regBody : D.regBodies[d.regBody] || 'Reg.') + ' ' + d.bmdc }
+  function regLine(d) { return ptype(d).regLabel + ' ' + d.bmdc }
+  function presOn() { return !!doc().presOn }
+  function medOn() { return !!doc().presOn && !!doc().medOn }
+  function isMine(r) { return (r.by || (r.byMe ? 'd1' : '')) === S.doc }
+  function docOf(r) { return DOCS[r.by || (r.byMe ? 'd1' : '')] }
+  function docNameOf(r) { var d = docOf(r); return d ? d.name : 'Dr. Imran Hossain' }
+  function initials(n) { return n.replace(/^Dr\.\s*/, '').split(/\s+/).filter(Boolean).slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase() }).join('') }
+
+  /* ---------- animals (PHAR-1707) ---------- */
+  function animalOf(p) { p = p || pat(); return p && p.animalId ? D.animals.filter(function (a) { return a.id === p.animalId })[0] : null }
+  function isAnimal(p) { return !!animalOf(p) }
+  function ownerOf(p) { p = p || pat(); return p && p.owner ? D.patients[p.owner] : null }
+  function animalAge(a) {
+    var days = Math.floor((TODAY.getTime() - pd(a.ageOn).getTime()) / 864e5)
+    var t = a.ageValue * ({ DAYS: 1, WEEKS: 7, MONTHS: 30.4, YEARS: 365.25 }[a.ageUnit]) + Math.max(0, days)
+    return t < 28 ? Math.round(t) + ' days' : t < 120 ? Math.round(t / 7) + ' weeks' : t < 730 ? Math.round(t / 30.4) + ' months' : Math.floor(t / 365.25) + ' y'
+  }
+  function spName(a) { return a.species === 'OTHER' ? (a.speciesOther || 'Other') : D.species[a.species] }
+  function animalDesc(a) { return spName(a) + (a.breed ? ' (' + a.breed + ')' : '') + ', ' + a.sex + ', ' + animalAge(a) }
+  function animalLine(a, w) { return a.name + ' — ' + animalDesc(a) + (num(w) ? ', ' + num(w) + ' kg' : '') }
+  function patientIdForAnimal(a) {
+    var ids = Object.keys(D.patients), i
+    for (i = 0; i < ids.length; i++) if (D.patients[ids[i]].animalId === a.id) return ids[i]
+    var id = 'v_' + a.id
+    D.patients[id] = { id: id, animalId: a.id, owner: a.owner, name: a.name, age: animalAge(a), sex: a.sex === 'F' ? 'Female' : 'Male', phone: '', relation: null, allergies: [], vitals: { bp: '', pulse: '', temp: '', weight: '', height: '', spo2: '', rr: '' }, returning: false, chronic: [], last: null }
+    D.history[id] = D.history[id] || []
+    return id
+  }
+  function myAnimals() { return D.animals.filter(function (a) { return a.owner === 'p1' && !a.deleted }) }
+  function ownerTag(p) { var o = isAnimal(p) ? ownerOf(p) : null; return o ? ' &middot; Owner: ' + esc(o.name) : '' }
+
+  /* ---------- derived block fields (never typed; mock formulas, NOT clinically verified) ---------- */
+  var DX = {
+    edd: function (v) { return v.lmp ? fmtY(addDays(pd(v.lmp), 280)) : '-' },
+    ga: function (v) { if (!v.lmp) return '-'; var d = Math.floor((TODAY.getTime() - pd(v.lmp).getTime()) / 864e5); return d < 0 ? 'LMP is in the future' : Math.floor(d / 7) + ' w ' + (d % 7) + ' d' },
+    bmi: function (v) { var w = num(S.draft.vitals.weight), h = (num(v.lengthHeight) || num(S.draft.vitals.height)) / 100; return w && h ? (w / (h * h)).toFixed(1) + ' kg/m2' : '-' },
+    who: function () { return '' },
+    egfr: function (v) {
+      var cr = num(v.creatinine), p = pat(), a = /y/.test(p.age) ? parseInt(p.age, 10) : 0
+      if (!cr || !a) return '-'
+      var e = 175 * Math.pow(cr, -1.154) * Math.pow(a, -0.203) * (p.sex === 'Female' ? 0.742 : 1)
+      return Math.round(e) + ' mL/min/1.73 m2, ' + (e >= 90 ? 'G1' : e >= 60 ? 'G2' : e >= 45 ? 'G3a' : e >= 30 ? 'G3b' : e >= 15 ? 'G4' : 'G5')
+    },
+    ratio: function (v) { return num(v.fev1) && num(v.fvc) ? Math.round(num(v.fev1) / num(v.fvc) * 100) + '%' : '-' },
+    cp: function (v) {
+      var b = num(v.bilirubin), al = num(v.albumin), inr = num(v.inr)
+      if (!b || !al || !inr) return '-'
+      var s = (b < 2 ? 1 : b <= 3 ? 2 : 3) + (al > 3.5 ? 1 : al >= 2.8 ? 2 : 3) + (inr < 1.7 ? 1 : inr <= 2.3 ? 2 : 3) + ({ No: 1, Mild: 2, Moderate: 3, Tense: 3 }[v.ascites] || 1) + 1
+      return s + ' points, class ' + (s <= 6 ? 'A' : s <= 9 ? 'B' : 'C') + ' (encephalopathy assumed none)'
+    },
+    pod: function (v) { if (!v.procedureDate) return '-'; var d = Math.floor((TODAY.getTime() - pd(v.procedureDate).getTime()) / 864e5); return d < 0 ? 'planned' : 'POD ' + d },
+    bsa: function () { var w = num(S.draft.vitals.weight), h = num(S.draft.vitals.height); return w && h ? Math.sqrt(w * h / 3600).toFixed(2) + ' m2' : '-' },
+    das28: function (v) {
+      if (!num(v.esr) || !num(v.patientGlobalHealth)) return '-'
+      var x = 0.56 * Math.sqrt(num(v.tenderJoints)) + 0.28 * Math.sqrt(num(v.swollenJoints)) + 0.70 * Math.log(num(v.esr)) + 0.014 * num(v.patientGlobalHealth)
+      return x.toFixed(1) + (x < 2.6 ? ' remission' : x < 3.2 ? ' low activity' : x <= 5.1 ? ' moderate activity' : ' high activity')
+    },
+    abi: function (v) { return num(v.anklePressure) && num(v.brachialPressure) ? (num(v.anklePressure) / num(v.brachialPressure)).toFixed(2) : '-' },
+    poly: function () { var n = S.draft.lines.filter(function (l) { return !isStop(l) }).length; return n ? n + ' medicine' + (n > 1 ? 's' : '') + (n >= 5 ? ' - polypharmacy' : '') : '-' },
+    vnorm: function () { var a = animalOf(), r = a && D.vetNorm[a.species]; return r ? 'Temp ' + r[0] + ' F, pulse ' + r[1] + '/min, resp ' + r[2] + '/min (' + spName(a).toLowerCase() + ')' : 'Not available for this species' },
+    calving: function (v) { return v.aiServiceDate ? fmtY(addDays(pd(v.aiServiceDate), 283)) : '-' }
+  }
+  function derived(def, f) { return (DX[f.fn] || function () { return '-' })(bvals(def.id), def.id) }
+  function bvals(bid) { var b = S.draft.blocks; return b[bid] = b[bid] || {} }
+
+  /* ---------- tooth chart (dental block) ---------- */
+  var TOOTH_C = [['caries', 'Caries'], ['missing', 'Missing'], ['filled', 'Filled'], ['rct', 'RCT'], ['crown', 'Crown']]
+  var TOOTH_AB = { caries: 'C', missing: 'X', filled: 'F', rct: 'RCT', crown: 'Cr' }
+  var UP = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28], LO = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38]
+  function toothParts(t) {
+    var p = (t.c || []).map(function (c) { return TOOTH_C.filter(function (x) { return x[0] === c })[0][1] })
+    if (t.mob) p.push('mobility ' + t.mob)
+    if (t.proc) p.push('procedure: ' + t.proc)
+    return p
+  }
+  function toothText(v) { var T = v.teeth || {}; return Object.keys(T).sort().map(function (n) { var p = toothParts(T[n]); return p.length ? n + ' ' + p.join(', ') : '' }).filter(Boolean).join('; ') }
+  function toothHtml(v) {
+    var T = v.teeth || {}, sel = S.tooth
+    function row(a) {
+      return '<div class="trow">' + a.map(function (n) {
+        var t = T[n], ab = t ? (t.c || []).map(function (c) { return TOOTH_AB[c] }).join('') : '', on = t && toothParts(t).length
+        return '<button type="button" class="tooth' + (on ? ' has' : '') + (sel === n ? ' sel' : '') + '" data-act="toothSel" data-t="' + n + '" aria-label="Tooth ' + n + '">' + n + '<small>' + esc(ab) + '</small></button>'
+      }).join('') + '</div>'
+    }
+    var st = sel ? (T[sel] || { c: [], mob: '', proc: '' }) : null
+    var pan = sel ? '<div class="tpanel"><b>Tooth ' + sel + '</b>' + TOOTH_C.map(function (c) {
+      return '<label class="mchk"><input type="checkbox" data-th="' + sel + '" data-thf="c" data-thv="' + c[0] + '" data-fk="th.' + sel + '.' + c[0] + '"' + (st.c.indexOf(c[0]) >= 0 ? ' checked' : '') + '> ' + c[1] + '</label>'
+    }).join('') + '<label class="mchk">Mobility <select data-th="' + sel + '" data-thf="mob" data-fk="th.' + sel + '.mob">' + opts([['', '-'], ['I', 'I'], ['II', 'II'], ['III', 'III']], st.mob) + '</select></label>' +
+      '<input class="txt" data-th="' + sel + '" data-thf="proc" data-fk="th.' + sel + '.proc" placeholder="Procedure on this tooth" value="' + esc(st.proc) + '"></div>'
+      : '<p class="muted small">Click a tooth (FDI number) to record caries, missing, filled, RCT, crown, mobility and the procedure.</p>'
+    return '<div class="chart"><div class="muted small">Upper right &middot; upper left</div>' + row(UP) + row(LO) + '<div class="muted small">Lower right &middot; lower left</div>' + pan + '</div>'
+  }
+  function toothChange(el, live) {
+    var n = el.getAttribute('data-th'), f = el.getAttribute('data-thf'), v = bvals('dental'), T = v.teeth = v.teeth || {}, t = T[n] = T[n] || { c: [], mob: '', proc: '' }
+    if (f === 'c') { var c = el.getAttribute('data-thv'), i = t.c.indexOf(c); if (el.checked && i < 0) t.c.push(c); if (!el.checked && i >= 0) t.c.splice(i, 1) }
+    else t[f] = el.value
+    if (!toothParts(t).length) delete T[n]
+    blockCountSync('dental')
+    if (!live) blockRefresh('dental')
+  }
+
+  /* ---------- food safety (withdrawal) table ---------- */
+  function wdMap() { var v = bvals('foodSafety'); return v.wd = v.wd || {} }
+  function wdDates() {
+    var W = wdMap(), out = { meat: 0, milk: 0, eggs: 0 }
+    S.draft.lines.forEach(function (l) {
+      if (isStop(l) || !W[l.id]) return
+      ;['meat', 'milk', 'eggs'].forEach(function (t) { if (num(W[l.id][t])) out[t] = Math.max(out[t], courseDays(l) + num(W[l.id][t])) })
+    })
+    return out
+  }
+  function wdText() {
+    var m = wdDates(), p = []
+    ;[['milk', 'Do not sell milk'], ['meat', 'Do not slaughter or sell meat'], ['eggs', 'Do not sell eggs']].forEach(function (x) { if (m[x[0]]) p.push(x[1] + ' before ' + fmtY(addDays(TODAY, m[x[0]]))) })
+    return p.join('; ')
+  }
+  function wdItems() {
+    var W = wdMap()
+    return S.draft.lines.filter(function (l) { return !isStop(l) && W[l.id] && (num(W[l.id].meat) || num(W[l.id].milk) || num(W[l.id].eggs)) }).map(function (l) {
+      var w = W[l.id]; return lineName(l) + ': ' + ['meat', 'milk', 'eggs'].filter(function (t) { return num(w[t]) }).map(function (t) { return t + ' ' + num(w[t]) + ' d' }).join(', ')
+    }).join('; ')
+  }
+  function wdHtml() {
+    var W = wdMap(), ls = S.draft.lines.filter(function (l) { return !isStop(l) })
+    if (!ls.length) return '<p class="muted small">Add medicines first. Each medicine line needs its withdrawal period (days) for meat, milk and eggs; the safe-to-sell dates are derived.</p>'
+    return '<table class="mini wd"><thead><tr><th>Medicine</th><th>Meat (d)</th><th>Milk (d)</th><th>Eggs (d)</th></tr></thead><tbody>' + ls.map(function (l) {
+      return '<tr><td>' + esc(lineName(l)) + '</td>' + ['meat', 'milk', 'eggs'].map(function (t) {
+        return '<td><input class="txt wd-in" inputmode="numeric" data-wd="' + l.id + '" data-wt="' + t + '" data-fk="wd.' + l.id + '.' + t + '" value="' + esc((W[l.id] || {})[t] || '') + '" aria-label="' + t + ' withdrawal days"></td>'
+      }).join('') + '</tr>'
+    }).join('') + '</tbody></table><div class="wd-out" id="wdOut">' + (esc(wdText()) || 'No withdrawal period entered yet') + '</div>'
+  }
+  function wdChange(el) {
+    var W = wdMap(), id = el.getAttribute('data-wd'); (W[id] = W[id] || {})[el.getAttribute('data-wt')] = el.value
+    var o = $('#wdOut'); if (o) o.textContent = wdText() || 'No withdrawal period entered yet'
+    blockCountSync('foodSafety')
+  }
+
+  /* ---------- block form rendering, print text, counts ---------- */
+  function bat(b, k) { return 'data-bk="' + b + '" data-bf="' + k + '" data-fk="b.' + b + '.' + k + '"' }
+  function fieldHtml(def, f, v) {
+    var b = def.id, k = f.k, lab = '<span>' + esc(f.l) + '</span>', t = f.t
+    if (t === 'n') return '<label class="bf">' + lab + '<span class="vin"><input class="txt" inputmode="decimal" ' + bat(b, k) + ' value="' + esc(v[k]) + '">' + (f.u ? '<em>' + esc(f.u) + '</em>' : '') + '</span></label>'
+    if (t === 'd') return '<label class="bf">' + lab + '<input class="txt" type="date" ' + bat(b, k) + ' value="' + esc(v[k]) + '"></label>'
+    if (t === 's') return '<label class="bf">' + lab + '<select ' + bat(b, k) + '>' + opts([['', '-']].concat(f.o.map(function (o) { return [o, o] })), v[k] || '') + '</select></label>'
+    if (t === 'a') return '<label class="bf wide">' + lab + '<textarea class="txt" rows="2" ' + bat(b, k) + '>' + esc(v[k]) + '</textarea></label>'
+    if (t === 'm') return '<fieldset class="bf wide mm"><legend>' + esc(f.l) + '</legend>' + f.o.map(function (o) {
+      return '<label class="mchk"><input type="checkbox" data-bk="' + b + '" data-bf="' + k + '" data-bv="' + esc(o) + '" data-fk="b.' + b + '.' + k + '.' + esc(o) + '"' + ((v[k] || []).indexOf(o) >= 0 ? ' checked' : '') + '> ' + esc(o) + '</label>'
+    }).join('') + '</fieldset>'
+    if (t === 'rl') return '<div class="bf">' + lab + '<span class="rl"><input class="txt" placeholder="R" aria-label="' + esc(f.pl) + ' right" ' + bat(b, k + 'R') + ' value="' + esc(v[k + 'R']) + '"><input class="txt" placeholder="L" aria-label="' + esc(f.pl) + ' left" ' + bat(b, k + 'L') + ' value="' + esc(v[k + 'L']) + '"></span></div>'
+    if (t === 'x') return '<div class="bf bx' + (f.fn === 'who' || f.fn === 'cp' || f.fn === 'egfr' || f.fn === 'vnorm' || f.fn === 'das28' || f.fn === 'poly' ? ' wide' : '') + '">' + lab + '<b data-dv="' + b + '.' + k + '">' + (f.fn === 'who' ? 'Calculated by the server from WHO growth charts (not simulated here)' : esc(derived(def, f))) + '</b></div>'
+    if (t === 'v') { var w = num(S.draft.vitals.weight); return '<div class="bf bx">' + lab + '<b data-bw="1">' + (w ? esc(S.draft.vitals.weight) + ' kg' : 'not entered') + '</b><small>set in the header</small></div>' }
+    if (t === 'an') { var a = animalOf(); return '<div class="bf bx wide">' + lab + '<b>' + (a ? esc(animalLine(a)) : '-') + '</b>' + (a && a.features.length ? '<small>' + esc(a.features.join(', ')) + '</small>' : '') + '</div>' }
+    if (t === 'tt') return '<div class="bf wide">' + lab + toothHtml(v) + '</div>'
+    if (t === 'wd') return '<div class="bf wide">' + lab + wdHtml() + '</div>'
+    return '<label class="bf">' + lab + '<input class="txt" ' + bat(b, k) + ' value="' + esc(v[k]) + '"></label>'
+  }
+  function blockHtml(bid) {
+    var def = BL[bid], v = bvals(bid)
+    return '<div class="blk">' + def.fields.map(function (f) { return fieldHtml(def, f, v) }).join('') + '</div>'
+  }
+  function fieldText(def, f, v) {
+    var k = f.k, t = f.t, s
+    if (t === 't' || t === 's' || t === 'a') return String(v[k] || '').trim()
+    if (t === 'd') return v[k] ? fmtY(v[k]) : ''
+    if (t === 'n') return String(v[k] || '').trim() ? String(v[k]).trim() + (f.u ? ' ' + f.u : '') : ''
+    if (t === 'm') return (v[k] || []).join(', ')
+    if (t === 'rl') return v[k + 'R'] || v[k + 'L'] ? 'R ' + (v[k + 'R'] || '-') + ' / L ' + (v[k + 'L'] || '-') : ''
+    if (t === 'x') { s = derived(def, f); return s === '-' ? '' : s }
+    if (t === 'tt') return toothText(v)
+    if (t === 'wd') return wdItems()
+    return ''
+  }
+  function blockItems(bid) {
+    var def = BL[bid], v = bvals(bid), out = []
+    def.fields.forEach(function (f) {
+      if (bid === 'eye' && f.k === 'refraction') return
+      var s = fieldText(def, f, v); if (s) out.push(f.pl + ': ' + s)
+    })
+    return out
+  }
+  function blockCount(bid) {
+    var def = BL[bid], v = bvals(bid)
+    return def.fields.filter(function (f) { return f.t !== 'x' && f.t !== 'v' && f.t !== 'an' && fieldText(def, f, v) }).length
+  }
+  function eyeGlasses() {
+    var v = bvals('eye')
+    if (!v.refractionR && !v.refractionL) return ''
+    return '<table class="gl"><caption>Glasses prescription (sph / cyl / axis / add)</caption><tr><th>R</th><td>' + esc(v.refractionR || '-') + '</td></tr><tr><th>L</th><td>' + esc(v.refractionL || '-') + '</td></tr>' + (v.pd ? '<tr><th>PD</th><td>' + esc(v.pd) + ' mm</td></tr>' : '') + '</table>'
+  }
+  function blockPrintHtml(bid) {
+    var items = blockItems(bid), h = items.map(esc).join('; ')
+    if (bid === 'eye') h += eyeGlasses()
+    if (bid === 'foodSafety' && items.length) h = '<b class="fs-p">' + esc(wdText()) + '</b><br>' + h
+    return h
+  }
+  function blockCountSync(bid) {
+    var sec = $('[data-sec="b:' + bid + '"] .sec-t'); if (!sec) return
+    var c = sec.querySelector('.cnt'), n = blockCount(bid)
+    if (c) c.parentNode.removeChild(c)
+    if (n) { var s = document.createElement('span'); s.className = 'cnt'; s.textContent = n; sec.appendChild(s) }
+  }
+  function blockDerivedSync(bid) {
+    BL[bid].fields.forEach(function (f) {
+      if (f.t !== 'x' || f.fn === 'who') return
+      var el = $('[data-dv="' + bid + '.' + f.k + '"]'); if (el) el.textContent = derived(BL[bid], f)
+    })
+  }
+  function blocksSync() {
+    if (!S.draft) return
+    S.sections.forEach(function (c) { if (c.id.indexOf('b:') === 0 && !c.hidden) { blockDerivedSync(c.id.slice(2)); blockCountSync(c.id.slice(2)) } })
+    $$('[data-bw]').forEach(function (e) { var w = num(S.draft.vitals.weight); e.textContent = w ? S.draft.vitals.weight + ' kg' : 'not entered' })
+  }
+  function blockChange(el) {
+    var bid = el.getAttribute('data-bk'), f = el.getAttribute('data-bf'), v = bvals(bid)
+    if (el.type === 'checkbox') { var a = v[f] = v[f] || [], o = el.getAttribute('data-bv'), i = a.indexOf(o); if (el.checked && i < 0) a.push(o); if (!el.checked && i >= 0) a.splice(i, 1) }
+    else v[f] = el.value
+    blockDerivedSync(bid); blockCountSync(bid)
+  }
+  function blockRefresh(bid) {
+    keepFocus(function () { var el = $('[data-sec="b:' + bid + '"]'), c = cfg('b:' + bid); if (el && c) el.outerHTML = sectionHtml(secDef('b:' + bid), c) })
+  }
+  function hasContent() {
+    var dr = S.draft
+    return dr.lines.length || hasExtras(dr) || dr.tests.length || dr.dx.length || dr.libAdvice.length || Object.keys(dr.notes).some(function (k) { return dr.notes[k].length }) ||
+      S.sections.some(function (c) { return c.id.indexOf('b:') === 0 && !c.hidden && blockCount(c.id.slice(2)) })
+  }
+
+  /* ---------- per-doctor form: speciality template default + the doctor's own preferences on top (PHAR-1703) ---------- */
+  function tplSections(code) {
+    var spec = SPEC[code] || SPEC.OTHER, hide = spec.type === 'VETERINARY' ? ['kco', 'fh'] : []
+    var out = D.sections.map(function (s) { return { id: s.id, hidden: hide.indexOf(s.id) >= 0, collapsed: false } })
+    var at = out.map(function (c) { return c.id }).indexOf('oi') + 1
+    spec.blocks.forEach(function (b, i) { if (BL[b]) out.splice(at + i, 0, { id: 'b:' + b, hidden: false, collapsed: false }) })
+    return out
+  }
+  function loadDoc(id) {
+    if (S.doc) S.docPrefs[S.doc] = { sections: S.sections, customSecs: S.customSecs, secOverride: S.secOverride, tplCode: S.tplCode }
+    S.doc = id
+    var pr = S.docPrefs[id]
+    if (pr) { S.sections = pr.sections; S.customSecs = pr.customSecs; S.secOverride = pr.secOverride; S.tplCode = pr.tplCode }
+    else {
+      S.tplCode = doc().spec; S.sections = tplSections(S.tplCode); S.customSecs = []; S.secOverride = {}
+    }
+    S.msSel = null
+  }
+  // Switching template swaps the speciality blocks only; the doctor's own core-section order / hidden / renamed state stays.
+  function tplSwitch(code) {
+    S.tplCode = code
+    S.sections = S.sections.filter(function (c) { return c.id.indexOf('b:') !== 0 })
+    var at = S.sections.map(function (c) { return c.id }).indexOf('oi') + 1
+    SPEC[code].blocks.forEach(function (b, i) { if (BL[b]) S.sections.splice(at + i, 0, { id: 'b:' + b, hidden: false, collapsed: false }) })
+  }
+  function tplBar() {
+    var d = doc(), own = [d.spec].concat(d.sec || []), kind = ptype(d).patient
+    function op(c) { return '<option value="' + c + '"' + (c === S.tplCode ? ' selected' : '') + '>' + esc(specName(c)) + '</option>' }
+    var others = D.specCat.filter(function (s) { return own.indexOf(s.code) < 0 && D.practTypes[s.type].patient === kind })
+    var ad = S.sections.filter(function (c) { return c.adhoc && !c.hidden }).length
+    return '<div class="tplbar"><label>Form template <select data-act="tplSwitch" aria-label="Form template">' + (own.indexOf(S.tplCode) < 0 ? op(S.tplCode) : '') + '<optgroup label="Your specialities">' + own.map(op).join('') + '</optgroup>' +
+      '<optgroup label="Other specialities">' + others.map(function (x) { return op(x.code) }).join('') + '</optgroup></select></label><button class="btn ghost sm" data-act="blockPick">+ Add block</button></div>' +
+      (ad ? '<p class="muted small tpl-ad">' + ad + ' block' + (ad > 1 ? 's' : '') + ' added for this prescription only &middot; <button class="link" data-act="blockKeep">Keep on my form</button></p>' : '')
+  }
+  function blockPickModal() {
+    var kind = ptype().patient, byG = {}
+    D.blockLib.forEach(function (b) {
+      var vet = b.g === 'Veterinary', ok = kind === 'animal' ? (vet || b.id === 'localExam' || b.id === 'perioperative') : !vet
+      var c = cfg('b:' + b.id)
+      if (!ok || (c && !c.hidden)) return
+      ;(byG[b.g] = byG[b.g] || []).push(b)
+    })
+    var html = Object.keys(byG).map(function (g) {
+      return '<p class="muted small ms-sub">' + esc(g) + '</p><ol class="tpl-list ms-list">' + byG[g].map(function (b) {
+        return '<li class="ms-row"><span class="ms-name">' + esc(b.title) + ' <em class="ctag">wave ' + b.w + '</em><small>' + b.fields.length + ' fields' + (cfg('b:' + b.id) ? ' &middot; hidden on your form (restores it)' : '') + '</small></span><span class="qa-act"><button class="btn sm ghost" data-act="blockAdd" data-id="' + b.id + '">Add</button></span></li>'
+      }).join('') + '</ol>'
+    }).join('')
+    openModal({ title: 'Add a block to this prescription', cls: 'wide', body: '<p class="muted small">Any block from the library can be added ad hoc (for example a GP seeing an antenatal patient adds Obstetric). It applies to this prescription only unless you choose Keep on my form.</p>' + (html || '<div class="empty"><strong>All blocks are already on your form</strong></div>'),
+      foot: '<button class="btn primary" data-act="closeModal">Close</button>' })
+  }
+  function blockAdd(id) {
+    var c = cfg('b:' + id)
+    if (c) { c.hidden = false }
+    else {
+      var idx = -1; S.sections.forEach(function (x, i) { if (x.id.indexOf('b:') === 0) idx = i })
+      if (idx < 0) idx = S.sections.map(function (x) { return x.id }).indexOf('oi')
+      S.sections.splice(idx + 1, 0, { id: 'b:' + id, hidden: false, collapsed: false, adhoc: true })
+    }
+    closeModal(); renderNotes(); toast('Added ' + BL[id].title + ' to this prescription')
+  }
+
+  /* ---------- non-physician / vet print pieces (PHAR-1708, PHAR-1707) ---------- */
+  function sheetTitle() {
+    var d = doc(), t = (D.specPrint[d.spec] || {}).title || ptype(d).printTitle
+    return (t ? '<div class="sh-title">' + esc(t) + '</div>' : '') + (ptype(d).patient === 'animal' ? '<div class="sh-vet">For animal use only / শুধুমাত্র পশুর চিকিৎসার জন্য</div>' : '')
+  }
+  function rxLabelHtml() { var d = doc(), t = (D.specPrint[d.spec] || {}).rx || ptype(d).rxLabel; return t ? '<div class="sh-rxl">' + esc(t) + '</div>' : '' }
+  function planLis() { var o = S.draft.orders.length ? ordLis(S.draft.orders) : ''; return o || '<li class="muted">No plan items</li>' }
+  function patSpan(p) {
+    var a = animalOf(p), o = ownerOf(p)
+    if (a && o) return '<span><b>Patient:</b> ' + esc(animalLine(a, S.draft ? S.draft.vitals.weight : '')) + ' &middot; <b>Owner:</b> ' + esc(o.name) + '</span>'
+    return '<span><b>' + esc(p.name) + '</b>, ' + esc(p.age) + ' / ' + esc(p.sex) + (p.relation ? ' (' + esc(p.relation) + ')' : '') + '</span>'
+  }
+
+  /* ---------- medicine prescribing switched off (PHAR-1702) ---------- */
+  function renderRxOff() {
+    keepFocus(function () {
+      var d = doc(), pt = ptype(d), dr = S.draft
+      $('#rx').innerHTML = '<div class="rx-h"><h2><span class="rxs">&#8478;</span> Medicines <span class="cnt">0</span></h2></div>' +
+        '<div class="rx-off" id="rxOff"><b>Medicine prescribing is not enabled for this account</b><p>' + (d.presOn ? esc(pt.label) + ' accounts do not prescribe medicines by default (design 4.4). ' : 'Prescribing is disabled for this doctor. ') +
+        'You can still write clinical notes, advised tests, diet / exercise / therapy orders, advice and follow-up. Only a platform admin can switch medicine prescribing on.</p></div>' +
+        '<input class="txt" disabled placeholder="Medicine search is off for this account" aria-label="Medicine search (disabled)">' +
+        (dr.lines.length ? '<div class="rx-off warn" id="rxOffLines"><b>' + dr.lines.length + ' medicine line(s) are still on this draft</b><p>Completing is blocked until they are removed.</p>' + dr.lines.map(function (l) {
+          return '<div class="rx-offl">' + esc(lineName(l)) + ' <button class="link" data-act="removeLine" data-id="' + l.id + '">Remove</button></div>'
+        }).join('') + '</div>' : '') + ordersHtml()
+      $('#medcheck').innerHTML = ''
+    })
+  }
+  function seedPhrases(key) { return (D.specSeed[S.tplCode] || D.specSeed[doc().spec] || {})[key] || [] }
+  function openFirst() {
+    if (S.doc === 'd1') return openForScenario('returning')
+    var a = D.appointments.filter(function (x) { return x.doc === S.doc && x.status !== 'Done' })[0]
+    if (!a) { S.view = 'appointments'; return render() }
+    openConsult(a.patientId, a.serial)
+  }
+
+  /* ---------- doctor profile: specialities + prescribing status (PHAR-1701 / 1702) ---------- */
+  function renderProfile() {
+    var d = doc(), pt = ptype(d), kind = pt.patient, type = typeOf(d)
+    function opt(s) { var same = s.type === type; return '<option value="' + s.code + '"' + (s.code === d.spec ? ' selected' : '') + (same ? '' : ' disabled') + '>' + esc(s.name) + (same ? '' : ' (other practitioner type)') + '</option>' }
+    var primary = '<select data-act="specPrimary" aria-label="Primary speciality">' + D.specGroups.map(function (g) {
+      return '<optgroup label="' + esc(g.name) + '">' + g.codes.map(function (c) { return opt(SPEC[c]) }).join('') + '</optgroup>'
+    }).join('') + '</select>'
+    var secs = D.specCat.filter(function (s) { return s.type === type && s.code !== d.spec }).map(function (s) {
+      return '<label class="mchk"><input type="checkbox" data-act="specSec" data-code="' + s.code + '"' + (d.sec.indexOf(s.code) >= 0 ? ' checked' : '') + '> ' + esc(s.name) + '</label>'
+    }).join('')
+    var blocks = (SPEC[d.spec].blocks || []).map(function (b) { return '<span class="chip grey">' + esc(BL[b].title) + '</span>' }).join('') || '<span class="muted small">Core sections only (no speciality blocks)</span>'
+    function pill(on) { return '<span class="pill ' + (on ? 'on' : 'off') + '">' + (on ? 'enabled' : 'disabled') + '</span>' }
+    $('#view').innerHTML = '<div class="page narrow"><div class="page-h"><div><h1>My profile</h1><p class="muted">Specialities, practitioner type and prescribing status. Doctor settings screen (PHAR-1701 / 1702).</p></div></div>' +
+      (S.profileMsg ? '<div class="note" role="status">' + esc(S.profileMsg) + '</div>' : '') +
+      '<section class="pf-card"><h3>' + esc(d.name) + '</h3><div class="muted">' + esc(d.degrees) + '</div><div class="pf-g"><b>Registration</b><span>' + esc(D.regBodies[d.regBody]) + ' &middot; ' + esc(d.bmdc) + '</span>' +
+      '<b>Practitioner type</b><span><span class="tag">' + esc(pt.label) + '</span> <span class="muted small">follows the primary speciality; patient is ' + (kind === 'animal' ? 'an animal (the customer is the owner)' : 'a person') + '</span></span></div></section>' +
+      '<section class="pf-card"><h3>Specialities</h3><label class="fld"><span>Primary speciality (drives the default form template)</span>' + primary + '</label>' +
+      '<div class="fld"><span>Secondary specialities (used by doctor search and the template switcher)</span><div class="pf-sec">' + (secs || '<span class="muted small">None available</span>') + '</div></div>' +
+      '<p class="muted small">All of a doctor\'s specialities must share one practitioner type, so a vet cannot hold a human speciality and the patient type is never ambiguous. Specialities of another type are disabled here.</p>' +
+      '<div class="pf-g"><b>Shown on</b><span>consultation header, printed prescription and doctor search: <b>' + esc(specLine(d)) + '</b></span></div></section>' +
+      '<section class="pf-card"><h3>Prescribing permission</h3><div class="pf-g"><b>Prescription</b><span>' + pill(d.presOn) + '</span><b>Medicine prescribing</b><span>' + pill(d.medOn) + '</span></div>' +
+      '<p class="muted small">Set by the platform admin only (D15); doctors cannot change it. Defaults come from the practitioner type when the doctor is created and do not reset if the speciality changes later. Use the platform-admin switches in Prototype controls to try both states.</p></section>' +
+      '<section class="pf-card"><h3>Form template</h3><div class="pf-g"><b>Template</b><span>' + esc(specName(S.tplCode)) + '</span><b>Default blocks</b><span>' + blocks + '</span></div>' +
+      '<p class="muted small">Open a consultation to adjust: hide, rename and reorder sections or add blocks with Manage sections. Your choices are kept on top of the speciality default.</p></section>' +
+      '<section class="pf-card"><h3>Backfill note (migration)</h3><p class="small">Doctors used to type their speciality as free text. The migration matches it to a code (anything unmatched becomes <b>OTHER</b>) and keeps the old text for display.</p>' +
+      '<div class="pf-g"><b>Old free text</b><span>' + (d.oldSpec ? esc(d.oldSpec) : '<span class="muted">none (onboarded after the change)</span>') + '</span><b>Matched to</b><span>' + esc(d.spec) + (d.sec.length ? ' + ' + esc(d.sec.join(', ')) : '') + '</span></div>' +
+      '<details><summary class="small">Aliases recognised by the backfill</summary><p class="small muted">Medicine = INTERNAL_MEDICINE &middot; Neuromedicine = NEUROLOGY &middot; Chest Medicine / Chest Diseases = PULMONOLOGY &middot; Gynae &amp; Obs / Gynaecology = OBSTETRICS_GYNECOLOGY &middot; Child Specialist / Paediatrics = PEDIATRICS &middot; Skin &amp; VD = DERMATOLOGY &middot; Eye = OPHTHALMOLOGY &middot; Bone / Ortho = ORTHOPEDIC_SURGERY &middot; Kidney = NEPHROLOGY &middot; Liver = HEPATOLOGY &middot; Heart = CARDIOLOGY &middot; Diabetes = DIABETOLOGY &middot; Dental / BDS = DENTISTRY &middot; Vet / Veterinary / DVM = VETERINARY_GENERAL</p></details></section></div>'
+  }
+
+  /* ---------- customer portal: Find a doctor (PHAR-1706), animals + vet booking (PHAR-1707) ---------- */
+  var FIND_TABS = [['default', 'Doctors & dentists'], ['PHYSICIAN', 'Doctors'], ['DENTAL', 'Dentists'], ['ALLIED_HEALTH', 'Therapy & Nutrition'], ['TRADITIONAL', 'Homeopathy / Unani / Ayurveda'], ['VETERINARY', 'Veterinary']]
+  function findTypes(t) { return t === 'default' ? ['PHYSICIAN', 'DENTAL'] : [t] }
+  function findPool() { var ty = findTypes(S.find.type); return D.doctors.filter(function (d) { return ty.indexOf(typeOf(d)) >= 0 }) }
+  function findDocs() { var sp = S.find.spec; return findPool().filter(function (d) { return !sp || d.spec === sp || (d.sec || []).indexOf(sp) >= 0 }) }
+  function findFacet() {
+    var m = {}
+    findPool().forEach(function (d) { [d.spec].concat(d.sec || []).forEach(function (c) { m[c] = (m[c] || 0) + 1 }) })
+    return Object.keys(m).sort(function (a, b) { return specName(a) < specName(b) ? -1 : 1 }).map(function (c) { return [c, m[c]] })
+  }
+  function findHtml() {
+    var f = S.find, list = findDocs()
+    var tabs = FIND_TABS.map(function (t) {
+      var n = D.doctors.filter(function (d) { return findTypes(t[0]).indexOf(typeOf(d)) >= 0 }).length
+      return '<button class="fchip' + (f.type === t[0] ? ' on' : '') + '" data-act="findType" data-t="' + t[0] + '">' + esc(t[1]) + ' <em>' + n + '</em></button>'
+    }).join('')
+    var sel = '<select data-act="findSpec" aria-label="Speciality"><option value="">All specialities</option>' + findFacet().map(function (x) { return '<option value="' + x[0] + '"' + (f.spec === x[0] ? ' selected' : '') + '>' + esc(specName(x[0])) + ' (' + x[1] + ')</option>' }).join('') + '</select>'
+    var cards = list.map(function (d) {
+      var pt = ptype(d)
+      return '<div class="dcard"><div><b>' + esc(d.name) + '</b> <span class="tag">' + esc(pt.tab === 'Doctors' ? 'Doctor' : pt.label) + '</span></div><div class="muted small">' + esc(d.degrees) + '</div><div class="small">' + esc(specLine(d)) + '</div>' +
+        '<div class="muted small">' + esc(regShort(d)) + ' &middot; ' + esc(d.chamber) + '</div>' + (pt.patient === 'animal' ? '<div class="small"><span class="chip vet">Animal patients only</span></div>' : '') +
+        '<div class="dact"><span class="small">&#2547; ' + d.fee + '</span><button class="btn sm primary" data-act="bookOpen" data-id="' + d.id + '">Book</button></div></div>'
+    }).join('')
+    return '<h3>Find a doctor</h3><div class="fchips" role="group" aria-label="Practitioner type">' + tabs + '</div><label class="fld"><span>Speciality</span>' + sel + '</label>' +
+      (f.note ? '<div class="note small">' + esc(f.note) + '</div>' : '') + '<p class="muted small" id="findCount">' + list.length + ' result' + (list.length === 1 ? '' : 's') + (f.type === 'default' ? ' &middot; doctors and dentists only; other practitioner types appear when you pick their tab' : '') + '</p>' + (cards || '<div class="empty slim">No practitioners match.</div>')
+  }
+  function ferr(er, k) { return er && er[k] ? '<small class="need">' + esc(er[k]) + ' <i>(' + k + ')</i></small>' : '' }
+  function animalsHtml() {
+    var list = myAnimals()
+    return '<h3>My animals</h3><p class="muted small">Animals are stored under your account as the owner. A vet can only be booked for one of these.</p>' + (list.length ? list.map(function (a) {
+      var pid = patientIdForAnimal(a), n = (D.history[pid] || []).length
+      return '<div class="acard"><div><b>' + esc(a.name) + '</b> <span class="tag">' + esc(D.animalTypes[a.animalType]) + '</span></div><div class="muted small">' + esc(animalDesc(a)) + '</div>' + (a.features.length ? '<div class="small">' + a.features.map(esc).join(' &middot; ') + '</div>' : '') +
+        '<div class="aact"><button class="link" data-act="animalEdit" data-id="' + a.id + '">Edit</button><button class="link" data-act="animalRx" data-id="' + pid + '">Prescriptions (' + n + ')</button><button class="link danger-text" data-act="animalDel" data-id="' + a.id + '">Remove</button></div></div>'
+    }).join('') : '<div class="empty slim">No animals yet.</div>') + '<button class="btn primary sm" data-act="animalNew">+ Add an animal</button>'
+  }
+  function animalForm(id, v, er) {
+    var a = id ? D.animals.filter(function (x) { return x.id === id })[0] : null
+    v = v || (a ? { name: a.name, animalType: a.animalType, species: a.species, speciesOther: a.speciesOther, breed: a.breed, sex: a.sex, ageValue: a.ageValue, ageUnit: a.ageUnit, feat: a.features.join('\n') } : { name: '', animalType: '', species: '', speciesOther: '', breed: '', sex: 'F', ageValue: '', ageUnit: 'YEARS', feat: '' })
+    S.afId = id || null
+    function sel(i, list, cur, blank) { return '<select id="af' + i + '">' + (blank ? '<option value="">- choose -</option>' : '') + opts(list, cur) + '</select>' }
+    var body = '<div class="af-g"><label class="fld"><span>Name *</span><input class="txt" id="afName" value="' + esc(v.name) + '">' + ferr(er, 'name') + '</label>' +
+      '<label class="fld"><span>Type of animal *</span>' + sel('Type', Object.keys(D.animalTypes).map(function (k) { return [k, D.animalTypes[k]] }), v.animalType, true) + ferr(er, 'animalType') + '</label>' +
+      '<label class="fld"><span>Which animal *</span>' + sel('Species', Object.keys(D.species).map(function (k) { return [k, D.species[k]] }), v.species, true) + ferr(er, 'species') + '</label>' +
+      '<label class="fld"><span>If other, which</span><input class="txt" id="afOther" value="' + esc(v.speciesOther) + '">' + ferr(er, 'speciesOther') + '</label>' +
+      '<label class="fld"><span>Breed (optional)</span><input class="txt" id="afBreed" value="' + esc(v.breed) + '"></label>' +
+      '<label class="fld"><span>Sex</span>' + sel('Sex', [['F', 'Female'], ['M', 'Male']], v.sex) + '</label>' +
+      '<label class="fld"><span>Age (an estimate is fine) *</span><span class="row"><input class="txt" id="afAge" inputmode="numeric" value="' + esc(v.ageValue) + '">' + sel('Unit', [['DAYS', 'days'], ['WEEKS', 'weeks'], ['MONTHS', 'months'], ['YEARS', 'years']], v.ageUnit) + '</span>' + ferr(er, 'ageValue') + '</label>' +
+      '<label class="fld wide"><span>Recognising features (one per line: colour, markings, ear tag, microchip)</span><textarea class="txt" id="afFeat" rows="3">' + esc(v.feat) + '</textarea>' + Object.keys(er || {}).filter(function (k) { return k.indexOf('identifyingFeatures') === 0 }).map(function (k) { return ferr(er, k) }).join('') + '</label></div>' +
+      '<p class="muted small">Weight is not stored here - the vet records it on each prescription.</p>'
+    openModal({ title: a ? 'Edit animal' : 'Add an animal', cls: 'sm', body: body, foot: '<button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" data-act="animalSave">Save</button>' })
+  }
+  function animalRead() {
+    var g = function (i) { var e = $('#af' + i); return e ? e.value : '' }
+    return { name: g('Name').trim(), animalType: g('Type'), species: g('Species'), speciesOther: g('Other').trim(), breed: g('Breed').trim(), sex: g('Sex'), ageValue: g('Age').trim(), ageUnit: g('Unit'), feat: g('Feat') }
+  }
+  function animalCheck(v) {
+    var er = {}
+    if (!v.name) er.name = 'Name is required'
+    else if (v.name.length > 100) er.name = 'Name must be 100 characters or fewer'
+    if (!v.animalType) er.animalType = 'Type of animal is required'
+    if (!v.species) er.species = 'Which animal is required'
+    if (v.species === 'OTHER' && !v.speciesOther) er.speciesOther = 'Say which animal'
+    if (!(num(v.ageValue) > 0)) er.ageValue = 'Age is required (an estimate is fine)'
+    v.feat.split('\n').forEach(function (l, i) { if (l !== '' && !l.trim()) er['identifyingFeatures[' + i + ']'] = 'A feature cannot be blank' })
+    return er
+  }
+  function animalSave() {
+    var v = animalRead(), er = animalCheck(v)
+    if (Object.keys(er).length) return animalForm(S.afId, v, er)
+    var a = S.afId ? D.animals.filter(function (x) { return x.id === S.afId })[0] : null
+    var o = { name: v.name, animalType: v.animalType, species: v.species, speciesOther: v.species === 'OTHER' ? v.speciesOther : '', breed: v.breed, sex: v.sex, ageValue: num(v.ageValue), ageUnit: v.ageUnit, ageOn: D.today, features: v.feat.split('\n').map(function (l) { return l.trim() }).filter(Boolean) }
+    if (a) Object.assign(a, o)
+    else { a = Object.assign({ id: 'an' + (S.seq++), owner: 'p1' }, o); D.animals.push(a) }
+    var p = D.patients[patientIdForAnimal(a)]; p.name = a.name; p.age = animalAge(a); p.sex = a.sex === 'F' ? 'Female' : 'Male'
+    closeModal(); renderPatient(); toast('Saved ' + a.name)
+  }
+  function custAppts() {
+    return D.appointments.filter(function (a) { var p = D.patients[a.patientId]; return p && (p.id === 'p1' || p.owner === 'p1') })
+  }
+  function custApptsHtml() {
+    var list = custAppts()
+    return '<h3>My appointments</h3>' + (list.map(function (a) {
+      var p = D.patients[a.patientId], d = DOCS[a.doc]
+      return '<div class="acard"><div><b>' + esc(d.name) + '</b> <span class="tag">' + esc(ptype(d).label) + '</span></div><div class="small">' + (a.date ? fmtY(a.date) : 'Today') + ', ' + esc(a.time) + ' &middot; Serial #' + a.serial + ' &middot; ' + esc(a.status) + '</div>' +
+        '<div class="muted small">' + (isAnimal(p) ? 'Animal: ' + esc(p.name) + ' (owner Rahima Begum)' : 'Patient: ' + esc(p.name)) + ' &middot; ' + esc(a.reason) + '</div></div>'
+    }).join('') || '<div class="empty slim">No appointments.</div>')
+  }
+  function bookModal(id, er, keep) {
+    var d = DOCS[id], vet = ptype(d).patient === 'animal', an = myAnimals(), k = keep || {}
+    var body = '<div class="dcard"><b>' + esc(d.name) + '</b><div class="muted small">' + esc(specLine(d)) + ' &middot; ' + esc(d.chamber) + '</div></div>' +
+      '<label class="fld"><span>Day</span><select id="bkDate">' + opts([[D.today, 'Today, ' + fmtY(D.today)], ['2026-10-22', 'Thu, 22 Oct 2026']], k.date || D.today) + '</select></label>' +
+      '<label class="fld"><span>Time</span><select id="bkTime">' + opts(D.fuSlots.times.filter(function (t) { return D.fuSlots.taken.indexOf(t) < 0 }).map(function (t) { return [t, t] }), k.time || '') + '</select></label>' +
+      '<label class="fld"><span>Reason</span><input class="txt" id="bkReason" value="' + esc(k.reason || '') + '" placeholder="e.g. fever, check-up"></label>'
+    if (vet) body += '<label class="fld"><span>Which animal? *</span><select id="bkAnimal"><option value="">- choose -</option>' + opts(an.map(function (a) { return [a.id, a.name + ' - ' + spName(a)] }), k.animal || '') + '</select>' + ferr(er, 'animalId') + '</label>' + (an.length ? '' : '<p class="muted small">Add an animal in My animals first.</p>')
+    else body += '<p class="muted small">This booking is for you. Animal selection is only offered for veterinary doctors (an <b>animalId</b> sent for a non-vet doctor is rejected).</p>'
+    openModal({ title: 'Book an appointment', cls: 'sm', body: body, foot: '<button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" data-act="bookConfirm" data-id="' + id + '">Confirm booking</button>' })
+  }
+  function bookConfirm(id) {
+    var d = DOCS[id], vet = ptype(d).patient === 'animal', g = function (i) { var e = $('#bk' + i); return e ? e.value : '' }
+    var k = { date: g('Date'), time: g('Time'), reason: g('Reason'), animal: g('Animal') }
+    if (vet && !k.animal) return bookModal(id, { animalId: 'Choose which animal you are booking for' }, k)
+    var a = vet ? D.animals.filter(function (x) { return x.id === k.animal })[0] : null
+    var serial = Math.max.apply(null, D.appointments.map(function (x) { return x.serial })) + 1
+    D.appointments.push({ serial: serial, doc: id, date: k.date === D.today ? undefined : k.date, time: k.time, patientId: vet ? patientIdForAnimal(a) : 'p1', reason: k.reason || (vet ? a.name + ' - check-up' : 'Consultation'), status: 'Waiting', tag: 'Booked from portal' })
+    closeModal(); S.pvTab = 'appts'; renderPatient()
+    toast('Booked ' + d.name + ' for ' + (vet ? a.name : 'you') + ', serial #' + serial + (id.charAt(0) === 'd' ? ' - visible on that doctor\'s list' : ''))
+  }
+
+  function blockInfo(d) {
+    var b = BL[d.bid], u = D.specCat.filter(function (s) { return s.blocks.indexOf(b.id) >= 0 }).map(function (s) { return s.name })
+    return 'Speciality block from the shared library (wave ' + b.w + ', ' + b.fields.length + ' fields). Default in: ' + (u.slice(0, 6).join(', ') || 'no template') + (u.length > 6 ? ' and ' + (u.length - 6) + ' more' : '') + '. You can rename, reorder or remove it from your form; values already typed are kept if you restore it.'
+  }
+  function docFieldset() {
+    var d = doc()
+    return '<fieldset><legend>Logged-in doctor</legend><select data-act="docSwitch" aria-label="Logged-in doctor">' + D.doctors.filter(function (x) { return x.login }).map(function (x) {
+      return '<option value="' + x.id + '"' + (x.id === S.doc ? ' selected' : '') + '>' + esc(specName(x.spec) + ' (' + x.name.replace(/^Dr\. /, '') + ')') + '</option>'
+    }).join('') + '</select><div class="muted small">' + esc(ptype(d).label) + ' &middot; ' + (ptype(d).patient === 'animal' ? 'animal patients' : 'human patients') + '</div></fieldset>' +
+      '<fieldset><legend>Platform admin</legend><label><input type="checkbox" data-act="presSw" data-k="presOn"' + (d.presOn ? ' checked' : '') + '> Prescription enabled</label>' +
+      '<label><input type="checkbox" data-act="presSw" data-k="medOn"' + (d.medOn ? ' checked' : '') + '> Medicine prescribing enabled</label></fieldset>'
+  }
+
+  Object.assign(A, {
+    docSwitch: function (e) { S.draft = null; loadDoc(e.value); S.view = 'appointments'; S.profileMsg = ''; closeModal(); render(); toast('Logged in as ' + doc().name + ' (' + ptype().label + ')') },
+    presSw: function (e) { doc()[e.getAttribute('data-k')] = e.checked; render(); toast((e.getAttribute('data-k') === 'presOn' ? 'Prescription ' : 'Medicine prescribing ') + (e.checked ? 'enabled' : 'disabled') + ' by the platform admin (simulated)') },
+    tplSwitch: function (e) { tplSwitch(e.value); renderNotes(); toast('Form template: ' + specName(e.value) + ' - your own section order and names are kept') },
+    blockPick: blockPickModal,
+    blockAdd: function (e) { blockAdd(e.getAttribute('data-id')) },
+    blockKeep: function () { S.sections.forEach(function (c) { delete c.adhoc }); renderNotes(); toast('Kept on your form for future prescriptions') },
+    toothSel: function (e) { S.tooth = +e.getAttribute('data-t'); blockRefresh('dental') },
+    pTab: function (e) { S.pvTab = e.getAttribute('data-t'); S.pv = null; S.pvPid = null; S.smsRx = null; renderPatient() },
+    findType: function (e) {
+      var t = e.getAttribute('data-t'); S.find.type = t; S.find.note = ''
+      if (S.find.spec && !findFacet().some(function (x) { return x[0] === S.find.spec })) { S.find.note = 'The speciality "' + specName(S.find.spec) + '" does not belong to the selected practitioner type, so the filter was cleared.'; S.find.spec = '' }
+      renderPatient()
+    },
+    findSpec: function (e) { S.find.spec = e.value; S.find.note = ''; renderPatient() },
+    bookOpen: function (e) { bookModal(e.getAttribute('data-id')) },
+    bookConfirm: function (e) { bookConfirm(e.getAttribute('data-id')) },
+    animalNew: function () { animalForm(null) },
+    animalEdit: function (e) { animalForm(e.getAttribute('data-id')) },
+    animalSave: animalSave,
+    animalDel: function (e) { var a = D.animals.filter(function (x) { return x.id === e.getAttribute('data-id') })[0]; if (window.confirm('Remove ' + a.name + '? Past prescriptions keep the record (soft delete).')) { a.deleted = true; renderPatient(); toast('Removed ' + a.name) } },
+    animalRx: function (e) { S.pvPid = e.getAttribute('data-id'); S.pvTab = 'rx'; S.pv = null; renderPatient() },
+    specPrimary: function (e) {
+      var d = doc(), c = e.value
+      if (!SPEC[c] || SPEC[c].type !== typeOf(d)) { render(); return toast('A doctor\'s specialities must share one practitioner type') }
+      d.spec = c; d.sec = d.sec.filter(function (x) { return x !== c }); tplSwitch(c)
+      S.profileMsg = 'Primary speciality is now ' + specName(c) + '. The form template switched to match; your prescribing switches did not change.'; render()
+    },
+    specSec: function (e) {
+      var d = doc(), c = e.getAttribute('data-code'), i = d.sec.indexOf(c)
+      if (e.checked && i < 0) d.sec.push(c); if (!e.checked && i >= 0) d.sec.splice(i, 1)
+      S.profileMsg = 'Secondary specialities: ' + (d.sec.length ? d.sec.map(specName).join(', ') : 'none'); render()
+    }
+  })
+  S.doc = null; S.docPrefs = {}; S.pvTab = 'rx'; S.pvPid = null; S.tooth = null; S.find = { type: 'default', spec: '', note: '' }; S.profileMsg = ''; S.afId = null
+  loadDoc('d1')
+
   function cfg(id) { return S.sections.filter(function (c) { return c.id === id })[0] }
   function moveSec(i, d) {
     var j = i + d; while (j >= 0 && j < S.sections.length && S.sections[j].hidden) j += d
@@ -2180,6 +2764,298 @@
     var t = a[i]; a[i] = a[j]; a[j] = t; renderRx()
   }
 
+  /* ================= WAVE 5: prescription access rules R1-R7 (PHAR-1709..1714) ================= */
+  // R1/R2: only the issuing doctor writes or edits (staff screens have no write control at all). R3/R4: a doctor reads own + patient-shared.
+  // R5: staff read only what is shared to their branch. R6: the patient sees every submitted Rx. R7: edit window counted from submission.
+  var CLOCK0 = new Date(D.today + 'T10:00:00').getTime()
+  var PHONES = { '01712345678': 'p1', '01819000204': 'p2' }
+  S.clockMin = 0; S.winMin = 1440; S.retired = []; S.prxPid = null; S.posBranch = 'b1'; S.posQ = ''; S.posNo = null; S.extTok = null; S.smsRx = null
+  S.linkAuth = null; S.lg = { step: 'phone', phone: '', otp: '', err: '', errF: '' }; S.shq = ''
+  function nowMs() { return CLOCK0 + S.clockMin * 60000 }
+  function nowIso() { var d = new Date(nowMs()); return isoDate(d) + 'T' + pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) }
+  function whenText(iso) { var d = new Date(iso.length === 10 ? iso + 'T10:00' : iso); return fmt(d) + ' ' + d.getFullYear() + ', ' + pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) }
+  function subIso(r) { return r.submittedAt || (r.date + 'T10:00') }
+  function leftMin(r) { return Math.floor((new Date(subIso(r)).getTime() + S.winMin * 60000 - nowMs()) / 60000) }
+  function leftText(m) { var h = Math.floor(m / 60); return (h ? h + 'h ' : '') + (m % 60) + 'm' }
+  function winLabel() { return S.winMin >= 60 ? (S.winMin / 60) + ' h' : S.winMin + ' min' }
+  function editOpen(r) { return isMine(r) && leftMin(r) > 0 }
+  function closedText(r) { return 'Edit window closed (' + winLabel() + ' after submission on ' + whenText(subIso(r)) + '). To change it now, write a new version with Continue from previous.' }
+  function rxById(id) { var k, i; for (k in D.history) for (i = 0; i < D.history[k].length; i++) if (D.history[k][i].id === id) return D.history[k][i]; return null }
+  function pidOfRx(r) { var k; for (k in D.history) if (D.history[k].indexOf(r) >= 0) return k; return null }
+  function rxByNo(no) { var k, i; for (k in D.history) for (i = 0; i < D.history[k].length; i++) if (D.history[k][i].no === no) return D.history[k][i]; return null }
+  function shareOn(r, kind, target) { return D.shares.filter(function (s) { return s.active && s.rx === r.id && s.kind === kind && (target === undefined || s.target === target) }) }
+  function branchName(id) { return D.branches.filter(function (b) { return b.id === id })[0].name }
+  function canRead(r) { return isMine(r) || shareOn(r, 'doctor', S.doc).length > 0 }
+  function visibleRxs(pid) {
+    var ed = S.draft && S.draft.editing
+    return (D.history[pid] || []).filter(function (r) { return canRead(r) && r.id !== ed }).sort(function (a, b) { return subIso(a) < subIso(b) ? 1 : -1 })
+  }
+  function maskName(n) { return n.charAt(0) + '*** ' + (n.split(' ')[1] || '').charAt(0) + '*****' }
+  function linkUrl(tok) { return 'https://portal.pharmaz247.example/s/' + tok }
+  function smsTok(r) { return hash(r.no).toString(36).slice(0, 6) }
+  function tick() {
+    if (S.view === 'consult') renderProto(); else render()
+    if (S.modal && S.modal.rxd) rxDrawer(S.modal.rxd)
+  }
+
+  // Read-only prescription body shared by the doctor drawer, the POS screen and the external link page (o.notes = clinical notes, o.patient = name line).
+  function rxReadHtml(rx, o) {
+    var lines = rx.lines.map(function (l) {
+      if (l.stop) return '<tr><td colspan="4"><b>STOP: ' + esc(l.name) + '</b>' + (l.reason ? '<small>' + esc(l.reason) + '</small>' : '') + '</td></tr>'
+      var m = medById(l.medId)
+      return '<tr><td><b>' + esc(m.brand + ' ' + m.strength) + '</b><small>' + esc(m.generic) + '</small></td><td>' + esc(l.steps ? l.steps.length + ' steps' : l.pattern) + '</td><td>' + esc(FOOD[l.food] || '') + '</td><td>' + daysText(l.days) + '</td></tr>'
+    }).join('')
+    return '<div class="ro"><h4>' + esc(rx.no) + ' &middot; v' + rx.version + ' &middot; ' + fmtY(rx.date) + '</h4>' +
+      '<p class="muted small">Submitted ' + esc(whenText(subIso(rx))) + ' &middot; ' + esc(docNameOf(rx)) + (rx.editedAt ? ' &middot; edited ' + esc(whenText(rx.editedAt)) : '') + '</p>' +
+      (o.patient ? '<p><b>Patient:</b> ' + esc(o.patient) + '</p>' : '') +
+      (o.notes ? '<div class="ro-g"><b>C/C</b><span>' + esc(rx.cc.join('; ') || '-') + '</span><b>Dx</b><span>' + esc(rx.dx.map(function (x) { return x.t + ' (' + DX_TYPES[x.type] + ')' }).join('; ') || '-') + '</span></div>' : '') +
+      '<table class="mini"><thead><tr><th>Medicine</th><th>Dose</th><th>Food</th><th>Duration</th></tr></thead><tbody>' + lines + '</tbody></table>' +
+      '<div class="ro-g">' + (o.notes ? '<b>Tests</b><span>' + esc(rx.tests.join(', ') || '-') + '</span>' : '') + '<b>Advice</b><span>' + esc(rx.advice.join('; ') || '-') + '</span><b>Follow-up</b><span>' + esc(rx.follow || '-') + '</span></div></div>'
+  }
+
+  /* ---------- doctor: Patient prescriptions (PHAR-1709, 1710, 1712) ---------- */
+  function prxPatients() {
+    var seen = {}, out = []
+    D.appointments.forEach(function (a) { if (a.doc === S.doc && !seen[a.patientId]) { seen[a.patientId] = 1; out.push(a.patientId) } })
+    return out
+  }
+  function editBox(r) {
+    if (!isMine(r)) return '<small>View only: written by another doctor and shared by the patient. Only the doctor who submitted a prescription can edit it (R2).</small>'
+    var m = leftMin(r)
+    return m > 0 ? '<span class="pill on">Editable for ' + leftText(m) + '</span> <small>Edit window: ' + winLabel() + ' from submission, then the prescription is final.</small>' : '<span class="pill off">Edit window closed</span> <small class="need">' + esc(closedText(r)) + '</small>'
+  }
+  function prxCard(r) {
+    var mine = isMine(r), br = shareOn(r, 'branch')
+    return '<li class="prx-c" data-rxid="' + r.id + '"><div class="prx-m"><b>' + esc(r.no) + '</b> <span class="muted">v' + r.version + ' &middot; ' + fmtY(r.date) + '</span> ' +
+      (mine ? '<span class="tag">Written by you</span>' : '<span class="tag shared">Shared by patient</span>') + (r.editedAt ? ' <span class="tag">edited</span>' : '') +
+      '<div class="muted small">' + esc(r.lines.length + ' medicine' + (r.lines.length === 1 ? '' : 's') + ' - ' + (r.dx.map(function (x) { return x.t }).join('; ') || 'no diagnosis')) + (mine ? '' : ' &middot; ' + esc(docNameOf(r))) + '</div>' +
+      '<div class="prx-win">' + editBox(r) + '</div>' + (mine && br.length ? '<div class="muted small">Sent to: ' + br.map(function (s) { return esc(branchName(s.target)) }).join(', ') + '</div>' : '') + '</div>' +
+      '<div class="prx-a"><button class="btn sm" data-act="rxOpen" data-id="' + r.id + '">Open</button>' +
+      (mine ? '<button class="btn sm primary" data-act="rxEdit" data-id="' + r.id + '"' + (editOpen(r) ? '' : ' disabled title="' + esc(closedText(r)) + '"') + '>Edit</button><button class="btn sm ghost" data-act="routeOpen" data-id="' + r.id + '">Send to pharmacy branch</button>' : '') + '</div></li>'
+  }
+  function renderPrx() {
+    var pids = prxPatients()
+    if (pids.indexOf(S.prxPid) < 0) S.prxPid = pids[0] || null
+    var list = S.prxPid ? visibleRxs(S.prxPid) : []
+    $('#view').innerHTML = '<div class="page narrow"><div class="page-h"><div><h1>Patient prescriptions</h1><p class="muted">You see the prescriptions you wrote, plus any the patient has shared with you (read-only). Nothing else.</p></div>' +
+      '<label class="fld"><span>Patient</span><select data-act="prxPat" aria-label="Patient">' + pids.map(function (p) { return '<option value="' + p + '"' + (p === S.prxPid ? ' selected' : '') + '>' + esc(D.patients[p].name) + '</option>' }).join('') + '</select></label></div>' +
+      '<div class="note small">Prototype time: ' + esc(whenText(nowIso())) + ' &middot; edit window ' + winLabel() + ' (change both in Prototype controls).</div>' +
+      (list.length ? '<ul class="prx-l">' + list.map(prxCard).join('') + '</ul>' : '<div class="empty"><strong>No prescriptions to show</strong><p>Prescriptions you wrote for this patient, and ones the patient shares with you, appear here.</p></div>') + '</div>'
+  }
+  function rxDrawer(id) {
+    var rx = rxById(id)
+    if (!rx || !canRead(rx)) return toast('Prescription not found or not shared with you')
+    var mine = isMine(rx)
+    openModal({ title: rx.no, drawer: true, cls: 'drawer', rxd: id,
+      body: '<p class="muted">' + (mine ? 'Your prescription for ' + esc(D.patients[pidOfRx(rx)].name) : 'Shared by the patient - view only') + '</p>' + rxReadHtml(rx, { notes: true }) + '<div class="prx-win">' + editBox(rx) + '</div>',
+      foot: (mine ? '<button class="btn primary" data-act="rxEdit" data-id="' + id + '"' + (editOpen(rx) ? '' : ' disabled') + '>Edit</button><button class="btn ghost" data-act="routeOpen" data-id="' + id + '">Send to pharmacy branch</button>' : '') + '<button class="btn ghost" data-act="closeModal">Close</button>' })
+  }
+  // Edit = in-place correction (same Rx number and version, new check code, copies printed earlier become "Not valid - changed"). A new version is a different thing: Continue from previous.
+  function editStart(id) {
+    var rx = rxById(id)
+    if (!rx || !isMine(rx)) return toast('Only the doctor who submitted a prescription can edit it')
+    if (leftMin(rx) <= 0) return toast('Edit window closed - ' + closedText(rx))
+    var pid = pidOfRx(rx), sr = rx.serial || (D.appointments.filter(function (a) { return a.doc === S.doc && a.patientId === pid })[0] || {}).serial
+    if (!sr) return toast('Prototype: no appointment to attach the edit to')
+    S.pid = pid; S.serial = sr; S.popupQ = []; S.showErr = false; S.savedAt = null
+    var dr = S.draft = newDraft(pat())
+    dr.editing = rx.id; dr.rxNo = rx.no; dr.bannerOff = true; dr.bnd = rx.bnd !== false
+    if (rx.draftJson) { dr = S.draft = JSON.parse(rx.draftJson); dr.editing = rx.id; dr.rxNo = rx.no; dr.bannerOff = true } else { /* seed records have no stored draft: rebuild the main parts */
+    rx.lines.forEach(function (hl) {
+      var l
+      if (hl.stop) { l = hl.medId ? lineFrom(hl.medId) : freeLine(hl.name); l.kind = 'STOP'; l.stopReason = hl.reason || '' } else l = lineFromHist(hl, rx)
+      l.cf = null; l.collapsed = false; addLine(l, true)
+    })
+    rx.tests.forEach(function (t) { dr.tests.push({ t: t }) })
+    rx.cc.forEach(function (t) { dr.notes.cc.push({ t: t }) })
+    rx.dx.forEach(function (x) { dr.dx.push({ t: x.t, type: x.type }) })
+    rx.advice.forEach(function (t) { dr.notes.advice.push({ t: t }) })
+    if (rx.fuRec && rx.fuRec.n) dr.fu = { unit: rx.fuRec.unit, n: String(rx.fuRec.n), note: rx.fuRec.note || '', rem: !!rx.fuRec.rem, remDays: String(rx.fuRec.remDays || 1), slot: null }
+    }
+    S.view = 'consult'; closeModal(); render()
+    toast('Editing ' + rx.no + ' - editable for ' + leftText(leftMin(rx)) + '. The full prescription is loaded.')
+  }
+  function finishEdit(ed, rec) {
+    var keep = ['id', 'no', 'version', 'date', 'byMe', 'by', 'serial', 'submittedAt', 'animalId'], dr = S.draft, oldCode = codeFor(ed.no)
+    Object.keys(rec).forEach(function (k) { if (keep.indexOf(k) < 0) ed[k] = rec[k] })
+    ed.edits = (ed.edits || 0) + 1; ed.editedAt = nowIso()
+    var code = genCode(ed.no + '#' + ed.edits)
+    S.retired.push({ no: ed.no, code: oldCode })
+    D.verifyDb = D.verifyDb.filter(function (r) { return r.no !== ed.no })
+    D.verifyDb.push({ no: ed.no, code: code, status: 'VALID', issued: fmtY(ed.date), doctor: doc().name, bmdc: doc().bmdc, patient: maskName(pat().name),
+      meds: dr.lines.map(function (l) { return isStop(l) ? 'STOP: ' + lineName(l) : lineName(l) + ' - ' + doseText(l) + ' - ' + durText(l).toLowerCase() }) })
+    S.lastIssued = { no: ed.no, code: code, version: ed.version }; dr.editing = null
+    openModal({ title: 'Prescription updated', cls: 'sm', body: '<div class="success"><div class="tick">&#10003;</div><h3>' + esc(ed.no) + ' &middot; v' + ed.version + ' (edited)</h3><p class="muted">Edited ' + esc(whenText(ed.editedAt)) + '. Same number and version; the submission time and the window did not change.</p>' +
+      qrHtml(ed.no + code) + '<div class="chkcode">New check code: ' + code + '</div></div>' +
+      '<div class="amber-note">Copies printed before this edit now show &ldquo;Not valid &ndash; changed&rdquo; (old code ' + esc(oldCode) + ').</div>' +
+      '<div class="note">The patient sees the latest version only. SMS (simulated): &ldquo;Your prescription ' + esc(ed.no) + ' was updated.&rdquo; The link requires patient login.</div>',
+      foot: '<button class="btn ghost" data-act="verifyThis">Open in Verify page</button><button class="btn primary" data-act="backToAppts">Back to appointments</button>' })
+  }
+
+  /* ---------- doctor -> branch routing (PHAR-1711, decision B: any time, never changes the content) ---------- */
+  function routeModal(id) {
+    var rx = rxById(id)
+    if (!rx || !isMine(rx)) return toast('Only the issuing doctor can send a prescription to a branch')
+    openModal({ title: 'Send to pharmacy branch', cls: 'sm', body: '<p class="muted small">' + esc(rx.no) + '. Allowed at any time, also after the edit window. Sending does not change the prescription; the branch can only read it.</p><ul class="shr-l">' +
+      D.branches.map(function (b) {
+        var on = shareOn(rx, 'branch', b.id).length > 0
+        return '<li><div><b>' + esc(b.name) + '</b><small>' + esc(b.addr) + '</small></div>' + (on ? '<span class="pill off">Sent</span>' : '<button class="btn sm primary" data-act="routeSend" data-id="' + id + '" data-b="' + b.id + '">Send</button>') + '</li>'
+      }).join('') + '</ul>', foot: '<button class="btn ghost" data-act="closeModal">Done</button>' })
+  }
+
+  /* ---------- patient: Share sheet, revoke, external link (PHAR-1711) ---------- */
+  function shRow(s) {
+    var who = s.kind === 'doctor' ? D.doctors.filter(function (d) { return d.id === s.target })[0] : null
+    var label = s.kind === 'doctor' ? esc(who.name) + ' <small>Doctor &middot; shared by you ' + esc(fmtY(s.at.slice(0, 10))) + '</small>'
+      : s.kind === 'branch' ? esc(branchName(s.target)) + ' <small>Pharmacy branch &middot; ' + (s.by === 'doctor' ? 'sent by your doctor' : 'shared by you') + ' ' + esc(fmtY(s.at.slice(0, 10))) + '</small>'
+      : '<span class="mono">' + esc(linkUrl(s.target)) + '</span> <small>View-only link &middot; created ' + esc(fmtY(s.at.slice(0, 10))) + '</small>'
+    var acts = !s.active ? '<span class="pill off">Revoked</span>' + (s.kind === 'link' ? ' <button class="link" data-act="extOpen" data-t="' + s.target + '">Open as recipient</button>' : '')
+      : (s.kind === 'link' ? '<button class="link" data-act="extOpen" data-t="' + s.target + '">Open as recipient</button>' : '') + (s.by === 'doctor' ? '' : '<button class="btn sm ghost" data-act="shRevoke" data-id="' + s.id + '">Revoke</button>')
+    return '<li class="' + (s.active ? '' : 'rev') + '"><div>' + label + '</div><div class="shr-a">' + acts + '</div></li>'
+  }
+  function shResults() {
+    var rx = rxById(S.shRx), q = S.shq.trim().toLowerCase(), issuer = rx.by || (rx.byMe ? 'd1' : '')
+    if (!q) return '<div class="muted small">Type a doctor name or speciality.</div>'
+    var res = D.doctors.filter(function (d) { return d.id !== issuer && !shareOn(rx, 'doctor', d.id).length && (d.name + ' ' + specName(d.spec) + ' ' + (d.chamber || '')).toLowerCase().indexOf(q) >= 0 }).slice(0, 6)
+    return res.length ? '<ul class="shr-l">' + res.map(function (d) { return '<li><div><b>' + esc(d.name) + '</b><small>' + esc(specName(d.spec)) + ' &middot; ' + esc(d.chamber || '') + '</small></div><button class="btn sm primary" data-act="shDoc" data-d="' + d.id + '">Share</button></li>' }).join('') + '</ul>' : '<div class="muted small">No doctor found.</div>'
+  }
+  function shSearch(v) { S.shq = v; var el = $('#shRes'); if (el) el.innerHTML = shResults() }
+  function shareModal(id) {
+    var rx = rxById(id); S.shRx = id; S.shq = ''
+    var all = D.shares.filter(function (s) { return s.rx === id }), act = all.filter(function (s) { return s.active }), rev = all.filter(function (s) { return !s.active })
+    openModal({ title: 'Share prescription', body: '<p class="muted small">' + esc(rx.no) + ' &middot; ' + fmtY(rx.date) + '. Only you and the doctor who wrote it can see it unless you share it. Shares never expire on their own; revoke any time and access ends at once.</p>' +
+      '<h4>Active shares</h4>' + (act.length ? '<ul class="shr-l" id="shAct">' + act.map(shRow).join('') + '</ul>' : '<div class="empty slim" id="shAct">Not shared with anyone.</div>') +
+      '<h4>Share with a doctor</h4><input class="txt" data-shq="1" placeholder="Search doctor name or speciality" value="" aria-label="Search doctor"><div id="shRes">' + shResults() + '</div>' +
+      '<h4>Share with a pharmacy branch</h4><ul class="shr-l">' + D.branches.map(function (b) {
+        var on = shareOn(rx, 'branch', b.id).length > 0
+        return '<li><div><b>' + esc(b.name) + '</b></div>' + (on ? '<span class="pill off">Shared</span>' : '<button class="btn sm" data-act="shBranch" data-b="' + b.id + '">Share</button>') + '</li>'
+      }).join('') + '</ul>' +
+      '<h4>Anyone outside the app</h4><p class="muted small">Creates a view-only link. Whoever has the link can read this prescription (no editing, no download) until you revoke it.</p><button class="btn sm" data-act="shLink">Create view-only link</button>' +
+      (rev.length ? '<h4>Revoked</h4><ul class="shr-l">' + rev.map(shRow).join('') + '</ul>' : ''),
+      foot: '<button class="btn primary" data-act="closeModal">Done</button>' })
+  }
+  function renderExt() {
+    var s = D.shares.filter(function (x) { return x.kind === 'link' && x.target === S.extTok })[0], rx = s && s.active ? rxById(s.rx) : null
+    $('#view').innerHTML = '<div class="page"><div class="page-h"><div><h1>External view-only link</h1><p class="muted">What a person outside the app sees when they open a link the patient created.</p></div><button class="btn ghost" data-act="goto" data-v="patient">&larr; Back to Patient view</button></div>' +
+      '<div class="phone"><div class="ph-bar">' + esc(linkUrl(S.extTok || '')) + '</div><div class="ph-b">' +
+      (rx ? '<h3>Shared prescription</h3><p class="muted small">View only. The patient shared this and can revoke the link at any time. No download, no editing.</p>' + rxReadHtml(rx, { notes: false, patient: maskName(D.patients[pidOfRx(rx)].name) })
+        : '<div class="vr bad"><strong>Link revoked</strong><p>The patient has revoked this link, or it is not valid. Nothing is shown.</p></div>') + '</div></div></div>'
+  }
+
+  /* ---------- patient: SMS link needs login (PHAR-1714, decision D) ---------- */
+  function smsHtml() {
+    var list = (D.history.p1 || []).slice().sort(function (a, b) { return subIso(a) < subIso(b) ? 1 : -1 })
+    return '<h3>SMS inbox (simulated)</h3><p class="muted small">What the patient receives. The link is the patient\'s own copy: it opens only after phone + OTP login.</p>' + list.map(function (r) {
+      return '<div class="sms"><small>PharmaZ247 &middot; ' + esc(whenText(subIso(r))) + '</small><p>PharmaZ247: Your prescription ' + esc(r.no) + ' from ' + esc(docNameOf(r)) + (r.editedAt ? ' was updated' : ' is ready') + '. View it (login required): <span class="mono">portal.pharmaz247.example/rx/' + smsTok(r) + '</span></p>' +
+        '<button class="btn sm" data-act="smsOpen" data-id="' + r.id + '">Open link</button></div>'
+    }).join('')
+  }
+  function lgErr(f) { return S.lg.errF === f && S.lg.err ? '<span class="fld-err">' + esc(S.lg.err) + '</span>' : '' }
+  function loginHtml() {
+    var g = S.lg
+    return '<div class="lgin"><button class="link" data-act="smsBack">&larr; Back to SMS</button><h3>Sign in to view your prescription</h3><p class="muted small">This link works only after you sign in. If it is forwarded to someone else, they see nothing.</p>' +
+      (g.step === 'phone' ? '<label class="fld"><span>Mobile number</span><input class="txt" data-lg="phone" value="' + esc(g.phone) + '" placeholder="01XXXXXXXXX" inputmode="numeric"></label>' + lgErr('phone') +
+        '<button class="btn primary" data-act="lgSend">Send OTP</button><div class="muted small">Demo numbers: 01712345678 (Rahima Begum), 01819000204 (Sabbir Hossain).</div>'
+        : '<p class="muted small">A 6-digit code was sent to ' + esc(g.phone.slice(0, 5) + '***' + g.phone.slice(-3)) + '.</p><div class="amber-note">Simulated SMS: your code is <b>123456</b></div><label class="fld"><span>OTP</span><input class="txt mono" data-lg="otp" value="' + esc(g.otp) + '" maxlength="6" inputmode="numeric"></label>' + lgErr('otp') +
+        '<div class="row"><button class="btn primary" data-act="lgVerify">Verify</button><button class="btn ghost" data-act="lgBack">Change number</button></div>') + '</div>'
+  }
+  function smsLinkBody() {
+    var rx = rxById(S.smsRx), owner = pidOfRx(rx)
+    if (!S.linkAuth) return loginHtml()
+    var who = D.patients[S.linkAuth.pid].name, bar = '<div class="linkbar muted small">Signed in as ' + esc(who) + ' &middot; <button class="link" data-act="lgOut">Sign out</button></div>'
+    if (S.linkAuth.pid !== owner) return bar + '<div class="vr bad"><strong>Not available</strong><p>This prescription was not issued to the signed-in account.</p></div>'
+    S.pv = rx.id; S.pvPid = owner
+    return bar + patientRxBody(owner)
+  }
+  function pvInfo(rx) {
+    var sh = D.shares.filter(function (s) { return s.rx === rx.id && s.active }).length
+    return '<p class="muted small">Submitted ' + esc(whenText(subIso(rx))) + (rx.editedAt ? ' &middot; <b>updated ' + esc(whenText(rx.editedAt)) + '</b> (this is the latest version)' : '') + (S.smsRx ? '' : ' &middot; shared with ' + sh + ' ' + (sh === 1 ? 'recipient' : 'recipients')) + '</p>'
+  }
+  function pcardExtra(r) { var n = D.shares.filter(function (s) { return s.rx === r.id && s.active }).length; return (r.editedAt ? ' &middot; edited' : '') + (n ? ' &middot; shared (' + n + ')' : '') }
+
+  /* ---------- staff / POS (PHAR-1713; R1 = no write controls exist) ---------- */
+  function sharedToBranch() {
+    var out = []
+    Object.keys(D.history).forEach(function (k) { D.history[k].forEach(function (r) { var s = shareOn(r, 'branch', S.posBranch)[0]; if (s) out.push({ rx: r, s: s, pid: k }) }) })
+    return out.sort(function (a, b) { return a.s.at < b.s.at ? 1 : -1 })
+  }
+  function posResult() {
+    if (S.posNo === null) return ''
+    var rx = rxByNo(S.posNo), s = rx ? shareOn(rx, 'branch', S.posBranch)[0] : null
+    if (!rx || !s) return '<div class="vr bad" id="posMsg"><strong>Not found or not shared with this branch</strong><p>Check the number. A prescription appears here only when the doctor or the patient has shared it with this branch.</p></div>'
+    return '<div class="pos-res" id="posMsg">' + rxReadHtml(rx, { notes: false, patient: D.patients[pidOfRx(rx)].name }) +
+      '<div class="note small">Shared to this branch by ' + (s.by === 'doctor' ? esc(docNameOf(rx)) + ' (issuing doctor)' : 'the patient') + ' on ' + esc(whenText(s.at)) + '. Read-only. Dispense from the POS sale screen.</div></div>'
+  }
+  function renderPos() {
+    var list = sharedToBranch()
+    $('#view').innerHTML = '<div class="page narrow"><div class="page-h"><div><h1>Pharmacy staff (POS)</h1><p class="muted">Prescription lookup for a pharmacy user. Prototype screen; the real POS sale screen is not shown.</p></div>' +
+      '<label class="fld"><span>Signed in at branch</span><select data-act="posBranch" aria-label="Branch">' + D.branches.map(function (b) { return '<option value="' + b.id + '"' + (b.id === S.posBranch ? ' selected' : '') + '>' + esc(b.name) + '</option>' }).join('') + '</select></label></div>' +
+      '<div class="amber-note"><b>Staff cannot create, draft or edit a prescription (R1).</b> This screen has no such control on purpose, and the server refuses a staff write with 403. Staff see only prescriptions shared to their own branch by the issuing doctor or the patient (R5).</div>' +
+      '<div class="pos-f"><label class="fld grow"><span>Rx number</span><input class="txt mono" id="posRx" value="' + esc(S.posQ) + '" placeholder="RX-A12345-0042"></label><button class="btn primary" data-act="posGo">Look up</button></div>' +
+      '<div id="posOut">' + posResult() + '</div>' +
+      '<h3>Shared to this branch</h3>' + (list.length ? '<ul class="prx-l">' + list.map(function (x) {
+        return '<li class="prx-c"><div class="prx-m"><b>' + esc(x.rx.no) + '</b> <span class="muted">' + fmtY(x.rx.date) + '</span><div class="muted small">' + esc(D.patients[x.pid].name) + ' &middot; ' + (x.s.by === 'doctor' ? 'sent by the doctor' : 'shared by the patient') + '</div></div><div class="prx-a"><button class="btn sm" data-act="posOpen" data-no="' + esc(x.rx.no) + '">Open</button></div></li>'
+      }).join('') + '</ul>' : '<div class="empty slim">Nothing is shared to this branch yet.</div>') + '</div>'
+  }
+  function protoClock() {
+    return '<fieldset><legend>Edit window / clock</legend><div class="muted small">Now: ' + esc(whenText(nowIso())) + '</div><select data-act="winSet" aria-label="Edit window">' +
+      [[1440, '24 h (default)'], [720, '12 h'], [60, '1 h'], [1, '1 min (expires fast)']].map(function (o) { return '<option value="' + o[0] + '"' + (S.winMin === o[0] ? ' selected' : '') + '>' + o[1] + '</option>' }).join('') + '</select>' +
+      '<div class="row"><button class="btn sm" data-act="clk" data-m="60">+1 h</button><button class="btn sm" data-act="clk" data-m="720">+12 h</button></div><div class="row"><button class="btn sm" data-act="clk" data-m="1440">+1 day</button><button class="btn sm" data-act="clk" data-m="0">Reset</button></div></fieldset>'
+  }
+
+  Object.assign(A, {
+    winSet: function (e) { S.winMin = +e.value; tick(); toast('Edit window: ' + winLabel() + ' from submission') },
+    clk: function (e) { var m = +e.getAttribute('data-m'); S.clockMin = m ? S.clockMin + m : 0; tick(); toast('Prototype time: ' + whenText(nowIso())) },
+    prxPat: function (e) { S.prxPid = e.value; renderPrx() },
+    rxOpen: function (e) { rxDrawer(e.getAttribute('data-id')) },
+    rxEdit: function (e) { editStart(e.getAttribute('data-id')) },
+    routeOpen: function (e) { routeModal(e.getAttribute('data-id')) },
+    routeSend: function (e) {
+      var rx = rxById(e.getAttribute('data-id')), b = e.getAttribute('data-b')
+      if (!rx || !isMine(rx)) return
+      D.shares.push({ id: 'shn' + (S.seq++), rx: rx.id, kind: 'branch', target: b, by: 'doctor', active: true, at: nowIso() })
+      routeModal(rx.id); if (S.view === 'prx') renderPrx()
+      toast('Sent to ' + branchName(b) + ' - the branch can now find ' + rx.no)
+    },
+    shareOpen: function (e) { shareModal(e.getAttribute('data-id')) },
+    shDoc: function (e) {
+      var rx = rxById(S.shRx), d = e.getAttribute('data-d')
+      D.shares.push({ id: 'shn' + (S.seq++), rx: rx.id, kind: 'doctor', target: d, by: 'patient', active: true, at: nowIso() })
+      shareModal(rx.id); renderPatient(); toast('Shared with ' + D.doctors.filter(function (x) { return x.id === d })[0].name + ' (view only)')
+    },
+    shBranch: function (e) {
+      var rx = rxById(S.shRx), b = e.getAttribute('data-b')
+      D.shares.push({ id: 'shn' + (S.seq++), rx: rx.id, kind: 'branch', target: b, by: 'patient', active: true, at: nowIso() })
+      shareModal(rx.id); renderPatient(); toast('Shared with ' + branchName(b))
+    },
+    shLink: function () {
+      var rx = rxById(S.shRx), tok = hash('t' + (S.seq++) + rx.no).toString(36).slice(0, 6)
+      D.shares.push({ id: 'shn' + (S.seq++), rx: rx.id, kind: 'link', target: tok, by: 'patient', active: true, at: nowIso() })
+      shareModal(rx.id); renderPatient(); toast('View-only link created: ' + linkUrl(tok))
+    },
+    shRevoke: function (e) {
+      var s = D.shares.filter(function (x) { return x.id === e.getAttribute('data-id') })[0]
+      s.active = false; s.revokedAt = nowIso(); shareModal(s.rx); renderPatient(); toast('Revoked - access ended immediately')
+    },
+    extOpen: function (e) { S.extTok = e.getAttribute('data-t'); closeModal(); S.view = 'ext'; render() },
+    smsOpen: function (e) { S.smsRx = e.getAttribute('data-id'); if (!S.linkAuth) S.lg = { step: 'phone', phone: '', otp: '', err: '', errF: '' }; renderPatient() },
+    smsBack: function () { S.smsRx = null; S.pv = null; S.pvPid = null; S.pvTab = 'sms'; renderPatient() },
+    lgSend: function () {
+      var p = S.lg.phone.replace(/\D/g, ''); S.lg.phone = p
+      if (!/^01\d{9}$/.test(p)) { S.lg.err = 'Enter an 11-digit mobile number starting with 01'; S.lg.errF = 'phone' } else { S.lg.step = 'otp'; S.lg.err = ''; S.lg.errF = ''; S.lg.otp = '' }
+      renderPatient()
+    },
+    lgBack: function () { S.lg.step = 'phone'; S.lg.err = ''; S.lg.errF = ''; renderPatient() },
+    lgVerify: function () {
+      if (S.lg.otp === '123456' && PHONES[S.lg.phone]) { S.linkAuth = { pid: PHONES[S.lg.phone] }; S.lg.err = ''; S.lg.errF = '' } else { S.lg.err = 'Incorrect code or number'; S.lg.errF = 'otp' }
+      renderPatient()
+    },
+    lgOut: function () { S.linkAuth = null; S.lg = { step: 'phone', phone: '', otp: '', err: '', errF: '' }; S.pv = null; S.pvPid = null; renderPatient(); toast('Signed out') },
+    posBranch: function (e) { S.posBranch = e.value; S.posNo = null; renderPos() },
+    posGo: function () { var i = $('#posRx'); S.posQ = i ? i.value : S.posQ; S.posNo = S.posQ.trim().toUpperCase(); renderPos() },
+    posOpen: function (e) { S.posQ = e.getAttribute('data-no'); S.posNo = S.posQ; renderPos() }
+  })
+
   document.addEventListener('click', function (ev) {
     var it = ev.target.closest('.sugg-item')
     if (it) return
@@ -2187,11 +3063,16 @@
     if (!el) { if (!ev.target.closest('.sg-wrap')) sgClose(); return }
     var fn = A[el.getAttribute('data-act')]
     if (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio') return
+    if (el.tagName === 'SELECT') return /* selects act on change */
     if (el.type === 'radio' || el.type === 'checkbox') return /* handled on change */
     if (fn) fn(el, ev)
   })
   document.addEventListener('change', function (ev) {
     var el = ev.target
+    if (el.tagName === 'SELECT' && el.getAttribute('data-act') && A[el.getAttribute('data-act')]) return A[el.getAttribute('data-act')](el, ev)
+    if (el.hasAttribute('data-bk')) blockChange(el)
+    if (el.hasAttribute('data-wd')) wdChange(el)
+    if (el.hasAttribute('data-th')) toothChange(el, false)
     if (el.type === 'radio' || el.type === 'checkbox') {
       var act = el.getAttribute('data-act')
       if (act && A[act]) return A[act](el, ev)
@@ -2212,6 +3093,12 @@
   })
   document.addEventListener('input', function (ev) {
     var el = ev.target
+    if (el.hasAttribute('data-gq')) return gFilter(el.value)
+    if (el.hasAttribute('data-lg')) { S.lg[el.getAttribute('data-lg')] = el.value; return }
+    if (el.hasAttribute('data-shq')) return shSearch(el.value)
+    if (el.hasAttribute('data-bk')) return blockChange(el)
+    if (el.hasAttribute('data-wd')) return wdChange(el)
+    if (el.hasAttribute('data-th') && el.type !== 'checkbox' && el.tagName !== 'SELECT') return toothChange(el, true)
     if (el.hasAttribute('data-sugg')) return sgOpen(el)
     if (el.hasAttribute('data-bind')) return bindChange(el)
     if (el.hasAttribute('data-xk') && el.type !== 'checkbox' && el.tagName !== 'SELECT') return xChange(el, true)
@@ -2244,6 +3131,7 @@
     if (ev.key === 'Enter' && el.id === 'msNewNote') { ev.preventDefault(); return A.noteAdd() }
     if (ev.key === 'Enter' && el.hasAttribute && el.hasAttribute('data-instr')) { ev.preventDefault(); return instrPush(el.getAttribute('data-instr'), el.value) }
     if (ev.key === 'Enter' && (el.id === 'vRx' || el.id === 'vCode')) return A.vGo()
+    if (ev.key === 'Enter' && el.id === 'posRx') return A.posGo()
     if (ev.key === '/' && S.view === 'consult' && !/INPUT|SELECT|TEXTAREA/.test(el.tagName) && !S.modal) {
       var m = $('[data-fk="in.med"]'); if (m) { ev.preventDefault(); m.focus() }
     }
@@ -2251,7 +3139,7 @@
   function bindChange(el) {
     var path = el.getAttribute('data-bind').split('.'), o = path[0] === 'vitals' ? S.draft.vitals : S.draft.fu
     o[path[1]] = el.value
-    if (path[0] === 'vitals') { var b = $('#bmi'); if (b) b.textContent = bmi() }
+    if (path[0] === 'vitals') { var b = $('#bmi'); if (b) b.textContent = bmi(); blocksSync() }
     if (path[0] === 'vitals' && path[1] === 'weight') { S.draft.lines.forEach(function (l) { if (l.dpkOn) { syncWk(l); patchLine(l) } }); weightErrSync() }
     if (path[0] === 'fu' && path[1] === 'n') { if (S.draft.fu.slot) { S.draft.fu.slot = null; toast('Follow-up changed - the booked slot was cleared') } var fx = $('#fuX'); if (fx) fx.outerHTML = fuExtra(); var i0 = $('#fuInfo'); if (i0) i0.textContent = followDate() ? 'Follow-up on ' + followDate() : '' }
     else if (path[0] === 'fu') { var i = $('#fuInfo'); if (i) i.textContent = followDate() ? 'Follow-up on ' + followDate() : '' }
@@ -2270,6 +3158,195 @@
     if (fld === 'mode' || fld === 'cont' || fld === 'startMode' || fld === 'route' || fld === 'dpkOn' || man !== manualQty(l)) return replaceLine(l)
     patchLine(l)
   }
+
+  /* ================= USER GUIDE: in-app help for non-developers (content in data.js D.guide) ================= */
+  var GUIDE = D.guide || []
+  var G_TAB = { appointments: 'Appointments', consult: 'Consultation', prx: 'Patient Rx', profile: 'My profile', verify: 'Verify (public)', patient: 'Patient view', pos: 'Pharmacy staff (POS)', ext: 'Patient view' }
+  S.gSec = 'start'; S.gQ = ''; S.gFrom = null; S.welcomeOff = false
+  function fake(o) { return { type: o.type || 'text', value: o.value || '', checked: !!o.checked, getAttribute: function (k) { return o[k] === undefined ? null : o[k] }, hasAttribute: function (k) { return o[k] !== undefined } } }
+  function gMd(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') }
+  function gList(tag, items) { return '<' + tag + '>' + items.map(function (t) { return '<li>' + gMd(t) + '</li>' }).join('') + '</' + tag + '>' }
+  function gTable(head, rows) {
+    // cell text comes from mock data (it can contain ***), so it is escaped only; the first column is bold
+    return '<div class="g-tw"><table class="g-t"><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>' }).join('') + '</tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr>' + r.map(function (c, i) { return '<td>' + (i ? esc(c) : '<b>' + esc(c) + '</b>') + '</td>' }).join('') + '</tr>' }).join('') + '</tbody></table></div>'
+  }
+  function gApptOf(pid, docId) { return D.appointments.filter(function (a) { return a.patientId === pid && (!docId || a.doc === docId) })[0] }
+  // Cheat-sheet tables are built from the mock data, so they always match what is on screen.
+  function gCheat(k) {
+    var P = D.patients, ids
+    if (k === 'scenarios') return gTable(['Scenario', 'Patient', 'Serial', 'Reason for visit'], [['returning', 'Returning patient'], ['first', 'First visit'], ['family', 'Family member']].map(function (s) {
+      var p = P[SCEN[s[0]]], a = gApptOf(p.id, 'd1')
+      return [s[1], p.name + ', ' + p.age + (p.relation ? ' (' + p.relation + ')' : ''), '#' + a.serial, a.reason]
+    }))
+    if (k === 'patients') {
+      ids = Object.keys(P).filter(function (id) { return !P[id].animalId })
+      return gTable(['Patient', 'Age / sex', 'Phone', 'Allergies', 'Other'], ids.map(function (id) {
+        var p = P[id]
+        return [p.name, p.age + ' / ' + p.sex, p.phone, p.allergies.length ? p.allergies.join(', ') : '-', (p.relation || '') + (p.chronic && p.chronic.length ? (p.relation ? '; ' : '') + 'Known: ' + p.chronic.join(', ') : '') || '-']
+      }))
+    }
+    if (k === 'doctors') {
+      return gTable(['Doctor', 'Speciality', 'Type', 'Appointments today'], D.doctors.filter(function (d) { return d.login }).map(function (d) {
+        var ap = D.appointments.filter(function (a) { return a.doc === d.id }).map(function (a) { return '#' + a.serial + ' ' + P[a.patientId].name }).join('; ')
+        return [d.name + (d.id === 'd1' ? ' (default)' : ''), specName(d.spec), ptype(d).label, ap || '-']
+      }))
+    }
+    if (k === 'rx') {
+      var meaning = { 'RX-A12345-0036': 'Valid (the Scan QR sample)', 'RX-A12345-0042': 'Valid, with a newer prescription note (Old prescription)', 'RX-A12345-0029': 'Not valid - changed', 'RX-A12345-0050': 'Issued today for Nasrin Akter. After you Edit it, this old code says "Not valid - changed"' }
+      var t1 = gTable(['Rx number', 'Check code', 'Verify result'], D.verifyDb.map(function (r) {
+        return [r.no, r.code, meaning[r.no] || (r.status === 'CHANGED' ? 'Not valid - changed' : 'Issued in this session')]
+      }).concat([['RX-A12345-9999', 'AAAA-1111', 'Not valid - not found (the "not found" demo)']]))
+      var rows = []
+      Object.keys(D.history).forEach(function (pid) {
+        D.history[pid].forEach(function (r) { rows.push([r.no, P[pid].name, 'v' + r.version + ', ' + fmtY(r.date), docNameOf(r), String(r.lines.length)]) })
+      })
+      return t1 + '<h3>Prescription history (Patient view and Patient Rx)</h3>' + gTable(['Rx number', 'Patient', 'Version and date', 'Written by', 'Medicines'], rows)
+    }
+    if (k === 'branches') return gTable(['Branch', 'Address'], D.branches.map(function (b) { return [b.name, b.addr] }))
+    if (k === 'animals') return gTable(['Animal', 'Species and breed', 'Sex, age', 'Features', 'Vet appointment'], D.animals.map(function (an) {
+      var pid = patientIdForAnimal(an), a = pid ? gApptOf(pid, 'd7') : null
+      return [an.name, spName(an) + (an.breed ? ' (' + an.breed + ')' : ''), an.sex + ', ' + animalAge(an), an.features.join('; '), a ? '#' + a.serial + ' with Dr. Shamim Reza (DVM)' : '-']
+    }))
+    return ''
+  }
+  function gPart(p) {
+    var h = '<h3>' + esc(p.h) + '</h3>'
+    if (p.ol) return h + gList('ol', p.ol)
+    if (p.ul) return h + gList('ul', p.ul)
+    return p.cheat ? h + gCheat(p.cheat) : ''
+  }
+  function gSecHtml(s) {
+    return '<section class="g-sec" id="g-' + s.id + '" data-gs="' + s.id + '"><h2>' + esc(s.title) + '</h2>' +
+      (s.tags && s.tags.length ? '<div class="g-tags">' + s.tags.map(function (t) { return '<span class="tag g-tag">' + esc(t) + '</span>' }).join('') + '</div>' : '') +
+      '<p class="g-lead">' + gMd(s.lead) + '</p>' + s.parts.map(gPart).join('') +
+      '<div class="g-show">' + s.show.map(function (b, i) { return '<button class="btn ' + (i ? 'ghost' : 'primary') + '" data-act="gShow" data-k="' + b.k + '">' + esc(b.label) + '</button>' }).join('') + '</div></section>'
+  }
+  function renderGuide() {
+    var from = S.gFrom && S.gFrom !== 'guide' ? S.gFrom : null
+    $('#view').innerHTML = '<div class="page guide"><div class="page-h"><div><h1>User guide</h1><p class="muted">How to use this prototype. No developer knowledge needed. <b>Show me</b> buttons set up the screen for you.</p></div>' +
+      '<div class="g-hb">' + (from ? '<button class="btn ghost" data-act="gBack">&larr; Back to ' + esc(G_TAB[from] || 'the prototype') + '</button>' : '') + '<button class="btn ghost" data-act="gPrint">Print the guide</button></div></div>' +
+      '<div class="g-searchrow"><input type="search" class="txt" data-gq="1" placeholder="Search the guide (for example: taper, share, OTP)" aria-label="Search the guide" value="' + esc(S.gQ) + '"><span class="muted small" id="gCount"></span></div>' +
+      '<div class="g-wrap"><details class="g-toc" id="gToc" open><summary>Contents</summary><ol class="g-toc-l">' + GUIDE.map(function (s) { return '<li data-gt="' + s.id + '"><button data-act="gGo" data-id="' + s.id + '">' + esc(s.title) + '</button></li>' }).join('') + '</ol></details>' +
+      '<div class="g-main">' + GUIDE.map(gSecHtml).join('') + '<p class="g-none" id="gNone" hidden>No section matches. Try a shorter word.</p></div></div></div>'
+    if (window.innerWidth <= 820) $('#gToc').removeAttribute('open')
+    gFilter(S.gQ); gMark()
+  }
+  function gFilter(q) {
+    S.gQ = q; var t = String(q).trim().toLowerCase(), n = 0
+    $$('.g-sec').forEach(function (el) {
+      var on = !t || el.textContent.toLowerCase().indexOf(t) >= 0, li = $('[data-gt="' + el.getAttribute('data-gs') + '"]')
+      if (on) { el.removeAttribute('hidden'); n++ } else el.setAttribute('hidden', '')
+      if (li) { if (on) li.removeAttribute('hidden'); else li.setAttribute('hidden', '') }
+    })
+    var none = $('#gNone'), c = $('#gCount')
+    if (none) { if (n) none.setAttribute('hidden', ''); else none.removeAttribute('hidden') }
+    if (c) c.textContent = t ? n + ' of ' + GUIDE.length + ' sections' : ''
+  }
+  function gMark() { $$('.g-toc-l li').forEach(function (li) { li.classList.toggle('on', li.getAttribute('data-gt') === S.gSec) }) }
+  function gScroll(id) { var el = $('#g-' + id); if (el) el.scrollIntoView({ block: 'start' }) }
+  function gOpen(id) {
+    if (S.view !== 'guide') S.gFrom = S.view
+    S.gSec = id || 'start'; S.view = 'guide'; closeModal(); render(); if (S.gSec !== 'start') gScroll(S.gSec)
+  }
+  window.addEventListener('scroll', function () {
+    if (S.view !== 'guide') return
+    var cur = null
+    $$('.g-sec').forEach(function (s) { if (!s.hidden && s.getBoundingClientRect().top < 130) cur = s.getAttribute('data-gs') })
+    if (cur && cur !== S.gSec) { S.gSec = cur; gMark() }
+  })
+
+  /* "Show me": set up the state, then call the same handlers a click would call. */
+  function gDoc(id) { closeModal(); if (S.doc !== id) { S.draft = null; loadDoc(id) } S.profileMsg = '' }
+  function gConsult(sc) { gDoc('d1'); openForScenario(sc) }
+  function gPreset(id) {
+    if (S.tpl.presets.some(function (p) { return p.id === id })) return A.addPreset(fake({ 'data-id': id }))
+    var p = D.medTemplates.presets.filter(function (x) { return x.id === id })[0]
+    if (p) addMedicine(p.med.id, p.med)
+  }
+  function gView(v) { gDoc('d1'); S.view = v; render() }
+  function gPatient(tab, rx) {
+    gDoc('d1'); S.view = 'patient'; S.pv = null; S.pvPid = null; S.smsRx = null; render()
+    A.pTab(fake({ 'data-t': tab }))
+    if (rx) A.pOpen(fake({ 'data-id': rx }))
+  }
+  function gVerify(k) {
+    gDoc('d1'); S.view = 'verify'; S.vf = { rx: 'RX-A12345-0036', code: 'ZP4M-8XQD', result: null }; render()
+    if (k) A.vDemo(fake({ 'data-k': k }))
+  }
+  function gPrx(p) { gDoc('d1'); S.winMin = p.win; S.clockMin = 0; S.view = 'prx'; S.prxPid = 'p4'; render() }
+  var GSHOW = {
+    start: function () { gDoc('d1'); S.protoOpen = true; S.view = 'appointments'; render(); var p = $('#proto'); if (p) { p.classList.add('g-flash'); setTimeout(function () { p.classList.remove('g-flash') }, 2500) }; toast('The Prototype controls box is bottom-left') },
+    tour: function () { gConsult('returning'); toast('Tour: you are at step 2 (Rahima Begum, returning patient)') },
+    notes: function () { gConsult('returning'); toast('Notes are on the left. Chips tagged "record" are pre-filled') },
+    manage: function () { gConsult('returning'); customiseModal() },
+    taper: function () { gConsult('first'); gPreset('s5'); toast('Cortan 5 taper added on the right: 4 steps, 100 tablets') },
+    infusion: function () { gConsult('first'); gPreset('s6'); gPreset('s7'); toast('Added Normal Saline (infusion) and Humulin (sliding scale)') },
+    weight: function () {
+      gConsult('family'); var l = addMedicine('napasyp')
+      lineChange(fake({ 'data-line': l.id, 'data-f': 'dpkOn', type: 'checkbox', checked: true }))
+      lineChange(fake({ 'data-line': l.id, 'data-f': 'dpk', value: '15' }))
+      toast('Arian (25 kg): Napa syrup at 15 mg/kg. Try changing the weight')
+    },
+    allergy: function () { gConsult('returning'); addMedicine('amox500'); addMedicine('clav625'); toast('Rahima is allergic to Penicillin: see the red cards') },
+    tpl: function () { gConsult('first'); A.openTpl() },
+    qa: function () { gConsult('first'); A.qaManage() },
+    lib: function () { gConsult('first'); A.openLib() },
+    orders: function () {
+      gConsult('returning')
+      var c = S.tpl.condition.filter(function (x) { return x.id === 'c2' })[0]
+      if (c) A.applyCond(fake({ 'data-id': 'c2' }))
+      toast('Hypertension follow-up applied. See Other orders under the medicines')
+    },
+    docs: function () {
+      gConsult('returning'); A.xAdd(fake({ 'data-k': 'ref' })); A.xAdd(fake({ 'data-k': 'adm' })); A.xAdd(fake({ 'data-k': 'cert' }))
+      toast('Three empty cards added. Press Complete to see the errors')
+    },
+    continue: function () {
+      gConsult('returning'); A.continue(fake({ 'data-id': ownRxs()[0].id })); gPreset('s3')
+      toast('Continued from your last prescription. Fexo is flagged against another doctor')
+    },
+    stop: function () { gConsult('returning'); stopModal() },
+    preview: function () { gConsult('first'); gPreset('s1'); A.preview() },
+    complete: function () { gConsult('first'); gPreset('s1'); A.complete() },
+    verify: function () { gVerify() },
+    verifyOld: function () { gVerify('old') },
+    patient: function () { gPatient('rx', 'rx42') },
+    share: function () { gPatient('rx', 'rx42'); A.shareOpen(fake({ 'data-id': 'rx42' })) },
+    find: function () { gPatient('find') },
+    animals: function () { gPatient('animals') },
+    sms: function () { gPatient('sms') },
+    profile: function () { gView('profile') },
+    blocks: function () { gConsult('returning'); toast('Speciality blocks (Renal, Diabetes, Cardiac) are in the notes column') },
+    physio: function () { gDoc('d5'); openFirst(); toast('Physiotherapist: medicine search is disabled') },
+    vet: function () { gDoc('d7'); openConsult('v1', gApptOf('v1', 'd7').serial) },
+    prx: function () { gPrx({ win: 1440 }); toast('Dr. Farhana, patient Nasrin Akter') },
+    win: function () { gPrx({ win: 60 }); toast('Edit window set to 1 h. Click +1 h in Prototype controls to close it') },
+    pos: function () { gDoc('d1'); S.view = 'pos'; S.posBranch = 'b1'; S.posQ = 'RX-A12345-0042'; render(); A.posGo() },
+    cheat: function () { gView('appointments') }
+  }
+  var goto0 = A.goto
+  A.goto = function (e) { var v = e.getAttribute('data-v'); if (v === 'guide' && S.view !== 'guide') S.gFrom = S.view; return goto0(e) }
+  Object.assign(A, {
+    gOpen: function (e) { gOpen(e && e.getAttribute('data-id')) },
+    gHelp: function (e) { gOpen(e.getAttribute('data-id') || 'notes') },
+    gGo: function (e) {
+      S.gSec = e.getAttribute('data-id'); gMark(); gScroll(S.gSec)
+      if (window.innerWidth <= 820) { var t = $('#gToc'); if (t) t.removeAttribute('open') }
+    },
+    gBack: function () {
+      var v = S.gFrom && S.gFrom !== 'guide' ? S.gFrom : 'appointments'
+      if (v === 'consult' && !S.draft) return openFirst()
+      S.view = v; render()
+    },
+    gPrint: function () { window.print() },
+    gWelcomeOff: function () { S.welcomeOff = true; var w = $('.g-welcome'); if (w) w.parentNode.removeChild(w) },
+    gShow: function (e) {
+      var f = GSHOW[e.getAttribute('data-k')]
+      if (!f) return nyi('guide action')
+      closeModal(); f()
+    }
+  })
 
   render()
 })()
