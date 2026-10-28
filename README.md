@@ -1,5 +1,7 @@
 # Doctor Portal prescription module - clickable design prototype
 
+> Non-developers: open the prototype and click **Guide** (last tab in the top bar). You do not need to read this file.
+
 Plain HTML + CSS + vanilla JS. No build, no network, no framework. All state is in memory (reload resets it). All data is mock and **not clinically verified** (brands, strengths and generics are illustrative).
 
 ## How to open
@@ -98,6 +100,8 @@ Keyboard: Tab through fields; in medicine search use Up/Down + Enter; press `/` 
 - **Find a doctor**: Patient view -> Find a doctor; try each chip, pick a speciality, switch chip. Veterinary -> Book -> confirm without choosing an animal (field error), then with Moti; switch doctor to the vet to find the new appointment.
 - **Profile**: My profile -> change the primary speciality / tick secondaries; a vet cannot pick human specialities.
 
+15. **In-app user guide (Guide tab)** - for product owners, doctors and testers. Left: sticky table of contents (folds on narrow screens) and a search box that filters sections. Right: 15 sections - Start here (prototype controls, tabs, keyboard), a 5-minute guided tour, one section per feature area (each with "How to test" steps, "What you should see" and Jira tags), What is simulated, a Mock data cheat sheet (built from the mock data, so it stays in sync) and the Open questions. Every section has **Show me** buttons that set up the scenario / doctor / state and take you there by calling the same handlers as a click. A **?** button in the consultation header opens the guide at Clinical notes (with a back button). A dismissible welcome card shows on Appointments on first load. **Print the guide** prints all sections expanded. Content lives in `data.js` (`D.guide`); the Show me table is `GSHOW` at the end of `app.js`. Update both when you add a feature.
+
 Out-of-scope controls show a "Prototype: not built" toast (walk-in registration, completed-visit view).
 
 ## Questions for the team
@@ -161,6 +165,7 @@ Out-of-scope controls show a "Prototype: not built" toast (walk-in registration,
 | Find a doctor with practitioner-type filter + facets | PHAR-1706; design 4.6, D13. Chip labels follow the design tabs; layout: assumed - check against ticket |
 | Animals under the customer, vet booking with `animalId`, vet Rx (animal strip, no human-only logic, withdrawal dates, vet print) | PHAR-1707; design 4.5, D13. Inline "add animal while booking" not built: assumed - check against ticket |
 | Non-physician print titles and plan layout | PHAR-1708; design 4.3 (non-physician practitioners). Titles / labels (EN + BN): assumed - check against ticket |
+| In-app user guide, Show me buttons, welcome card, printable | Prototype-only help for non-developers; covers every PHAR-1615 feature area above |
 | R1/R2 only the issuing doctor creates / edits (every portal, staff never); in-place edit, same number + version, new check code | PHAR-1709; access rules R1, R2; `prescription_continuation_and_already_on_check.md` (24 h in-place edit vs new version), `prescription_verification_flow.md` section 2 |
 | Edit window 24 h (configurable), counted from submission; countdown, disabled-with-reason, prototype clock | PHAR-1710; access rules R7, decisions 3 and A. Window options (12 h, 1 h, 1 min) and clock are prototype-only |
 | Patient share sheet: doctor, branch, view-only external link, revoke, download; doctor -> branch routing any time; external read-only page | PHAR-1711; access rules R4, R5, decisions B, C, E. Layout and the masked name on the link page: assumed |

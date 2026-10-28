@@ -587,7 +587,7 @@
         '<button class="btn ' + (done ? 'ghost' : 'primary') + '" data-act="' + (done ? 'viewDone' : 'openAppt') + '" data-serial="' + a.serial + '">' + (done ? 'View' : 'Open consultation') + '</button></li>'
     }).join('')
     $('#view').innerHTML = '<div class="page narrow"><div class="page-h"><div><h1>Today\'s appointments</h1><p class="muted">Wednesday, 21 Oct 2026 &middot; ' + esc(doc().chamber) + '</p></div>' +
-      '<button class="btn ghost" data-act="nyi" data-w="Walk-in registration">+ Add walk-in</button></div>' + (S.welcomeOff ? '' : '<div class="g-welcome" role="region" aria-label="Welcome"><div><strong>New here?</strong> Open the guide - 2-minute tour. It explains this prototype and takes you to each feature.</div><div class="g-wb"><button class="btn primary sm" data-act="gOpen" data-id="start">Open the guide</button><button class="icon-btn" data-act="gWelcomeOff" aria-label="Dismiss the welcome card" title="Dismiss">&times;</button></div></div>') + '<ul class="appts">' + rows + '</ul></div>'
+      '<button class="btn ghost" data-act="nyi" data-w="Walk-in registration">+ Add walk-in</button></div>' + (S.welcomeOff ? '' : '<div class="g-welcome" role="region" aria-label="Welcome"><div><strong>New here?</strong> Open the guide - start with the 5-minute tour. It explains this prototype and takes you to each feature.</div><div class="g-wb"><button class="btn primary sm" data-act="gOpen" data-id="start">Open the guide</button><button class="icon-btn" data-act="gWelcomeOff" aria-label="Dismiss the welcome card" title="Dismiss">&times;</button></div></div>') + '<ul class="appts">' + rows + '</ul></div>'
   }
 
   /* ---------- consult skeleton ---------- */
