@@ -602,8 +602,13 @@ main:focus { outline: 0; }
 .p-id { display: grid; gap: .15rem; }
 .p-name strong { font-size: 1.2rem; }
 .vitals { gap: .5rem; }
-.vi { background: #f7f8fc; border: 1px solid var(--line-2); border-radius: 10px; padding: .4rem .55rem .45rem; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
-.vi .vin { text-transform: none; letter-spacing: 0; font-weight: 400; }
+/* vitals read inline: "BP: 140/90 mmHg" */
+.vitals { align-items: center; justify-content: flex-end; }
+.vi { display: inline-flex; align-items: center; gap: .35rem; background: #f7f8fc; border: 1px solid var(--line-2); border-radius: 10px; padding: .3rem .6rem; font-size: .88rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.vi > span:first-child::after { content: ":"; }
+.vi .vin { align-items: center; gap: .3rem; font-weight: 400; }
+.vi .vin em { font-size: .8rem; }
+.vi .vin strong { font-size: 1rem; }
 .vin input { background: #fff; border-color: #dde2ec; font-weight: 600; padding: .3rem .35rem; }
 .vin strong { font-size: 1.15rem; color: var(--accent); }
 .banner { background: linear-gradient(100deg, #eef1fd, #f5f7ff); border-color: #d6dcf3; padding: .65rem 1rem; }
