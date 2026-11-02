@@ -726,32 +726,30 @@ body[data-view="consult"] .proto { bottom: 78px; }
 .rp-page small { display: inline; color: #5b6b7a; font-size: .86em; }
 
 /* header */
-.rp-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; background: var(--rp-tint); padding: 22px 30px 18px; }
-.rp-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.rp-steth svg { width: 56px; height: 56px; color: #1b2a3a; display: block; }
-.rp-name { margin: 0; font-size: 28px; line-height: 1.1; font-weight: 800; color: var(--rp); letter-spacing: -.01em; }
-.rp-qual { display: inline-block; margin-top: 4px; padding-bottom: 3px; font-size: 10.5px; letter-spacing: .22em; text-transform: uppercase; color: #2b3540; border-bottom: 2px solid; border-image: linear-gradient(90deg, var(--rp), rgba(21, 118, 194, 0)) 1; }
-.rp-cert { margin-top: 3px; font-size: 10.5px; color: #4d5b68; }
-.rp-hot { flex: none; align-self: stretch; display: flex; flex-direction: column; justify-content: center; align-items: center; border-left: 2px solid var(--rp); padding-left: 22px; }
-.rp-hl { background: var(--rp); color: #fff; font-weight: 800; letter-spacing: .14em; font-size: 13px; padding: 2px 10px; border-radius: 3px; }
-.rp-ph { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 14px; font-weight: 600; }
-.rp-ph svg { width: 14px; height: 14px; }
-.rp-bn { margin-top: 3px; font-size: 11px; color: #4d5b68; }
+/* modern pad: white header with a thin accent rule, no logo */
+.rp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; background: #fff; padding: 26px 32px 16px; border-top: 6px solid var(--rp); }
+.rp-who { min-width: 0; }
+.rp-name { margin: 0; font-size: 25px; line-height: 1.15; font-weight: 700; color: #0f1b2a; letter-spacing: -.02em; }
+.rp-qual { margin-top: 3px; font-size: 11.5px; font-weight: 600; color: var(--rp-d); }
+.rp-cert { margin-top: 2px; font-size: 10.5px; color: #5b6b7a; }
+.rp-ph { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 11.5px; font-weight: 600; color: #2b3540; }
+.rp-ph svg { width: 11px; height: 11px; color: var(--rp); }
+.rp-bn { flex: none; text-align: right; font-size: 13px; font-weight: 600; color: #4d5b68; padding-top: 4px; }
 
-/* NAME / AGE / DATE bar */
-.rp-bar { display: flex; align-items: stretch; border-top: 2px solid var(--rp); border-bottom: 2px solid var(--rp); }
-.rp-k { display: flex; align-items: center; background: var(--rp); color: #fff; font-weight: 800; font-size: 11.5px; letter-spacing: .04em; padding: 5px 10px; white-space: nowrap; }
-.rp-v { display: flex; align-items: center; gap: 4px; padding: 5px 10px; white-space: nowrap; }
+/* NAME / AGE / DATE bar: soft rounded strip, small grey labels */
+.rp-bar { display: flex; align-items: stretch; flex-wrap: wrap; gap: 0 4px; margin: 0 32px; padding: 7px 6px; background: #f4f7fb; border: 1px solid #e3e9f1; border-radius: 10px; }
+.rp-k { display: flex; align-items: center; padding: 2px 0 2px 10px; color: #7a8794; font-weight: 600; font-size: 9.5px; letter-spacing: .1em; white-space: nowrap; }
+.rp-v { display: flex; align-items: center; gap: 4px; padding: 2px 10px 2px 5px; white-space: nowrap; font-weight: 600; color: #15202b; }
 .rp-v.grow { flex: 1; white-space: normal; min-width: 0; }
 .rp-no { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
 
 /* two columns */
 .rp-body { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 31% 1fr; }
-.rp-l { overflow: hidden; display: flex; flex-direction: column; gap: 12px; background: var(--rp-tint); border-right: 2px solid var(--rp); padding: 16px 14px 20px; }
+.rp-l { overflow: hidden; display: flex; flex-direction: column; gap: 12px; background: #fafbfd; border-right: 1px solid #e3e9f1; padding: 18px 16px 20px 32px; }
 .rp-r { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; gap: 11px; padding: 14px 24px 22px; }
 .rp-r::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .9;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='43' fill='none' stroke='%23e1f1fb' stroke-width='9' stroke-dasharray='56.5 11'/%3E%3Cpath d='M39 20h22v19h19v22H61v19H39V61H20V39h19z' fill='%23e6f4fc'/%3E%3C/svg%3E") center 52% / 250px no-repeat; }
-.rp-sl { font-weight: 700; color: var(--rp-d); font-size: 12px; }
+.rp-sl { font-weight: 700; color: var(--rp-d); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
 .rp-sl abbr { text-decoration: none; font-weight: 600; font-size: 10px; color: #6b8aa5; }
 .rp-sv { margin-top: 2px; }
 .rp-sv ul { list-style: disc; padding-left: 15px; margin: 0; }
@@ -791,11 +789,10 @@ body[data-view="consult"] .proto { bottom: 78px; }
 .rp-cont { position: absolute; right: 24px; bottom: 6px; font-size: 10px; font-style: italic; color: #5b6b7a; }
 
 /* footer band */
-.rp-foot { display: flex; align-items: center; gap: 14px; padding: 12px 30px; border-top: 2px solid var(--rp); background: repeating-linear-gradient(90deg, #dff0fa 0 2px, #eef8fd 2px 5px); }
-.rp-hosp svg { display: block; width: 42px; height: 42px; color: var(--rp); }
+.rp-foot { display: flex; align-items: center; gap: 14px; padding: 10px 32px 14px; border-top: 1px solid #e3e9f1; background: #fff; }
 .rp-fa { min-width: 0; }
-.rp-hn { font-size: 19px; font-weight: 800; line-height: 1.15; color: var(--rp); text-transform: uppercase; }
-.rp-ha { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: #2b3540; }
+.rp-hn { font-size: 12px; font-weight: 700; line-height: 1.3; color: #2b3540; }
+.rp-ha { font-size: 10px; color: #6b7886; }
 .rp-pg { margin-left: auto; flex: none; font-size: 10px; color: #4d5b68; }
 
 /* referral / admission / certificate letters */
@@ -813,3 +810,7 @@ body[data-view="consult"] .proto { bottom: 78px; }
   body.printing .rp-page { box-shadow: none; break-after: page; }
   body.printing .rp-page:last-child { break-after: auto; }
 }
+
+/* demo + print buttons */
+.modal-f .mf-sp { flex: 1; }
+.proto .btn + .btn { margin-top: .35rem; }

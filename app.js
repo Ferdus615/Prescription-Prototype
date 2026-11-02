@@ -585,6 +585,8 @@
     next: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
+    print: '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/><path d="M17.5 12h.01"/>',
+    play: '<path d="M7 4v16l13-8z"/>',
     bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>'
   }
   function ico(n) { return '<svg class="ico-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICO[n] + '</svg>' }
@@ -606,7 +608,7 @@
     var stats = '<div class="stats">' + stat('s-navy', 'cal', list.length, 'Today\'s appointments', 'Scheduled for today') + stat('s-green', 'clock', waiting.length, 'Waiting', 'Checked in, to be seen') +
       stat('s-violet', 'check', nDone, 'Completed', 'Consultations done') + stat('s-amber', 'next', nxt ? nxt.time : '&ndash;', 'Next up', nxt ? esc(D.patients[nxt.patientId].name) + ' &middot; #' + nxt.serial : 'Queue is clear') + '</div>'
     $('#view').innerHTML = '<div class="page"><div class="page-h"><div><h1>Today\'s appointments</h1><p class="muted">Wednesday, 21 Oct 2026 &middot; ' + esc(doc().chamber) + '</p></div>' +
-      '<div class="page-ha"><button class="btn" data-act="gOpen" data-id="start">' + ico('book') + ' Guide</button><button class="btn success" data-act="nyi" data-w="Walk-in registration">' + ico('plus') + ' Add walk-in</button></div></div>' +
+      '<div class="page-ha"><button class="btn" data-act="gOpen" data-id="start">' + ico('book') + ' Guide</button><button class="btn violet" data-act="demoRx" title="Open a filled-in prescription and its printable A4 pages">' + ico('play') + ' Demo prescription</button><button class="btn success" data-act="nyi" data-w="Walk-in registration">' + ico('plus') + ' Add walk-in</button></div></div>' +
       (S.welcomeOff ? '' : '<div class="g-welcome" role="region" aria-label="Welcome"><span class="g-wi" aria-hidden="true">' + ico('bulb') + '</span><div><strong>New here?</strong> Open the guide &mdash; start with the 5-minute tour. It explains this prototype and takes you to each feature.</div><div class="g-wb"><button class="btn primary sm" data-act="gOpen" data-id="start">Open the guide</button><button class="icon-btn" data-act="gWelcomeOff" aria-label="Dismiss the welcome card" title="Dismiss">&times;</button></div></div>') +
       stats + '<section class="queue"><div class="queue-h"><h2>Queue</h2><span class="muted small">' + list.length + ' patient' + (list.length === 1 ? '' : 's') + ' &middot; ' + waiting.length + ' waiting</span></div>' +
       (rows ? '<ul class="appts">' + rows + '</ul>' : '<div class="empty">No appointments today.</div>') + '</section></div>'
@@ -1295,7 +1297,7 @@
       (wc.w ? ' &middot; <span class="warn-t2">&#9888; ' + wc.w + ' warning' + (wc.w > 1 ? 's' : '') + ' (' + wc.a + ' acknowledged)</span>' : '') +
       (ac.w ? ' &middot; <span class="err-t">&#9888; ' + ac.w + ' allergy warning' + (ac.w > 1 ? 's' : '') + ' (' + ac.a + ' with override reason)</span>' : '') +
       '<span class="muted small">' + (S.savedAt ? ' &middot; Draft saved ' + S.savedAt : ' &middot; Not saved yet') + '</span></div>' +
-      '<div class="bar-a"><button class="btn ghost" data-act="saveDraft">Save draft</button><button class="btn" data-act="preview">Preview</button><button class="btn primary" data-act="complete">' + (dr.editing ? 'Save edit' : 'Complete') + '</button></div>'
+      '<div class="bar-a"><button class="btn ghost" data-act="saveDraft">Save draft</button><button class="btn" data-act="preview">Preview</button><button class="btn" data-act="printNow" title="Open the A4 pages and print">' + ico('print') + ' Print</button><button class="btn primary" data-act="complete">' + (dr.editing ? 'Save edit' : 'Complete') + '</button></div>'
   }
   function tplModal() {
     var T = S.tplTab, tabs = [['condition', 'Condition templates'], ['combos', 'Saved combinations'], ['presets', 'Single-medicine presets']]
@@ -1602,7 +1604,7 @@
   }
   function docModal(k, o, c) {
     openModal({ title: { ref: 'Referral letter', adm: 'Admission advice', cert: 'Medical certificate' }[k], cls: 'wide', body: '<div class="sheet-wrap">' + docHtml(k, o, c) + '</div>',
-      foot: '<button class="btn ghost" data-act="printRx">Print</button><button class="btn ghost" data-act="closeModal">Close</button>' })
+      foot: '<button class="btn" data-act="printRx">' + ico('print') + ' Print</button><span class="mf-sp"></span><button class="btn ghost" data-act="closeModal">Close</button>' })
     paginateSoon()
   }
   function xAllErrs() {
@@ -1674,14 +1676,14 @@
      the end and a chamber footer band. Content is a list of blocks per column; paginateRx() flows them over as
      many A4 pages as needed and repeats header, bar and footer on every page. */
   var PAD_ICO = {
-    steth: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H9v13a9 9 0 0 0 18 0V5h-3"/><path d="M18 27v5a10 10 0 0 0 20 0v-6"/><circle cx="38" cy="22" r="4"/></svg>',
-    phone: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>',
-    hosp: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" aria-hidden="true"><path d="M8 44V14h32v30"/><path d="M16 6h16v8H16z"/><path d="M24 7.5v5M21.5 10h5"/><path d="M14 20h5v5h-5zM29 20h5v5h-5zM14 30h5v5h-5zM29 30h5v5h-5z"/><path d="M20 44v-7h8v7"/><path d="M4 44h40"/></svg>'
+    phone: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>'
   }
+  // Clean header: doctor block on the left (name, degrees, speciality/reg, phone), Bangla name on the right. No logo, no hotline box.
   function padHead(d) {
-    return '<header class="rp-head"><div class="rp-brand"><span class="rp-steth">' + PAD_ICO.steth + '</span><div class="rp-who"><h2 class="rp-name">' + esc(d.name) + '</h2>' +
-      '<div class="rp-qual">' + esc(d.degrees) + '</div><div class="rp-cert">' + esc(specLine(d)) + ' &middot; ' + esc(regLine(d)) + '</div></div></div>' +
-      '<div class="rp-hot"><span class="rp-hl">HOTLINE</span><div class="rp-ph">' + PAD_ICO.phone + esc(d.phone) + '</div>' + (d.nameBn ? '<div class="rp-bn">' + esc(d.nameBn) + '</div>' : '') + '</div></header>'
+    return '<header class="rp-head"><div class="rp-who"><h2 class="rp-name">' + esc(d.name) + '</h2>' +
+      '<div class="rp-qual">' + esc(d.degrees) + '</div><div class="rp-cert">' + esc(specLine(d)) + ' &middot; ' + esc(regLine(d)) + '</div>' +
+      (d.phone ? '<div class="rp-ph">' + PAD_ICO.phone + esc(d.phone) + '</div>' : '') + '</div>' +
+      (d.nameBn ? '<div class="rp-bn">' + esc(d.nameBn) + '</div>' : '') + '</header>'
   }
   function padBar(cells) {
     return '<div class="rp-bar">' + cells.map(function (c) { return '<span class="rp-k">' + c[0] + ':</span><span class="rp-v' + (c[2] ? ' ' + c[2] : '') + '">' + c[1] + '</span>' }).join('') + '</div>'
@@ -1696,7 +1698,7 @@
     return cells
   }
   function padFoot(d) {
-    return '<footer class="rp-foot"><span class="rp-hosp">' + PAD_ICO.hosp + '</span><div class="rp-fa"><div class="rp-hn">' + esc(d.chamber) + '</div><div class="rp-ha">' + esc(d.chamberAddr) +
+    return '<footer class="rp-foot"><div class="rp-fa"><div class="rp-hn">' + esc(d.chamber) + '</div><div class="rp-ha">' + esc(d.chamberAddr) +
       (d.chamberBn ? ' &middot; ' + esc(d.chamberBn) : '') + '</div></div><span class="rp-pg"></span></footer>'
   }
   function padSign(d, no, code, note) {
@@ -1782,12 +1784,32 @@
     paginateRx($('#modalRoot'))
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { paginateRx($('#modalRoot')) })
   }
+  // Print straight from the consultation: open the preview, lay the pages out, then print.
+  function printNow() {
+    previewModal()
+    var go = function () { paginateRx($('#modalRoot')); A.printRx() }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { setTimeout(go, 50) }); else setTimeout(go, 50)
+  }
+  // Demo: a filled-in prescription for Rahima Begum (returning patient), so the printed pad can be seen in one click.
+  function demoRx() {
+    gDoc('d1'); S.scenario = 'returning'
+    var a = D.appointments.filter(function (x) { return x.patientId === 'p1' && x.doc === 'd1' })[0]
+    openConsult('p1', a ? a.serial : 2)
+    var dr = S.draft
+    ;['Cough for 5 days', 'Headache, worse in the evening', 'Low-grade fever'].forEach(function (t) { dr.notes.cc.push({ t: t }) })
+    ;['c1', 'c2'].forEach(function (id) { var c = S.tpl.condition.filter(function (x) { return x.id === id })[0]; if (c) applyCondition(c) })
+    if (!dr.tests.some(function (t) { return t.t === 'Chest X-ray P/A view' })) dr.tests.push({ t: 'Chest X-ray P/A view' })
+    dr.notes.advice.push({ t: 'রাতে পর্যাপ্ত ঘুমাবেন / Sleep 7-8 hours at night' })
+    renderNotes(); renderRx(); renderBar()
+    previewModal()
+    toast('Demo prescription loaded - use Print to get the A4 pages')
+  }
   function previewModal() {
     var dr = S.draft, hs = histSkipped()
     var opt = '<div class="pv-opt"><div class="pv-o"><span><b>Digits on the patient part</b> (directions, duration, follow-up)</span><div class="seg" role="group" aria-label="Digits"><button class="' + (dr.bnd ? 'on' : '') + '" data-act="bndSet" data-v="1">বাংলা ১২৩</button><button class="' + (dr.bnd ? '' : 'on') + '" data-act="bndSet" data-v="0">English 123</button></div> ' + (S.bndDefault === dr.bnd ? '<span class="muted small">your default</span>' : '<button class="link" data-act="bndDefault">Make this my default</button>') + '</div>' +
       '<label class="chk-i"><input type="checkbox" data-act="printHist"' + (S.printHist ? ' checked' : '') + '> Also print long history (P/H, F/H)' + (hs.length ? ' <span class="muted small">- ' + esc(hs.join(', ')) + ' not printed now; kept in the record and the patient view</span>' : '') + '</label></div>'
     openModal({ title: 'Prescription preview (A4)', cls: 'wide', body: opt + '<div class="sheet-wrap">' + sheetHtml() + '</div><p class="muted small center">Preview only - the real QR and check code are generated when you complete. Long prescriptions continue on extra pages; the header, patient bar and footer repeat on each page.</p>',
-      foot: '<button class="btn ghost" data-act="printRx">Print</button><button class="btn ghost" data-act="closeModal">Back to editing</button><button class="btn primary" data-act="complete">Complete</button>' })
+      foot: '<button class="btn" data-act="printRx">' + ico('print') + ' Print</button><span class="mf-sp"></span><button class="btn ghost" data-act="closeModal">Back to editing</button><button class="btn primary" data-act="complete">Complete</button>' })
     paginateSoon()
   }
   function completeModal() {
@@ -1979,7 +2001,7 @@
       }).join('') + '</fieldset>' +
       protoClock() + '<fieldset><legend>Warning style</legend>' + [['inline', 'A. Inline card'], ['panel', 'B. Side panel'], ['popup', 'C. Pop-up on add']].map(function (s) {
         return '<label><input type="radio" name="ws" data-act="wstyle" value="' + s[0] + '"' + (S.warnStyle === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>'
-      }).join('') + '</fieldset><button class="btn sm ghost" data-act="reset">Reset demo data</button>'
+      }).join('') + '</fieldset><button class="btn sm ghost" data-act="demoRx">Demo prescription + print</button><button class="btn sm ghost" data-act="reset">Reset demo data</button>'
   }
 
   /* ---------- suggestions engine ---------- */
@@ -2296,6 +2318,8 @@
       var o = k === 'ref' ? rx.refs.filter(function (r) { return r.id === e.getAttribute('data-id') })[0] : rx[k]
       docModal(k, o, { p: D.patients.p1, no: rx.no, date: rx.date, dx: o.dxText })
     },
+    demoRx: function () { demoRx() },
+    printNow: function () { printNow() },
     printRx: function () { document.body.classList.add('printing'); window.print(); document.body.classList.remove('printing') },
     backToAppts: function () { closeModal(); S.view = 'appointments'; S.draft = null; render() },
     verifyThis: function () { closeModal(); S.vf = { rx: S.lastIssued.no, code: S.lastIssued.code, result: null }; S.view = 'verify'; render() },
