@@ -637,14 +637,14 @@
     var idb = an
       ? '<div class="p-id"><div class="p-name"><strong>' + esc(an.name) + '</strong> <span class="muted">' + esc(animalDesc(an)) + '</span></div><div class="muted">Owner: ' + esc(ow.name) + ' &middot; ' + esc(ow.phone) + '</div>' +
         '<div><span class="chip vet">For animal use only</span>' + an.features.map(function (x) { return '<span class="chip grey">' + esc(x) + '</span>' }).join('') + '</div></div>'
-      : '<div class="p-id"><div class="p-name"><strong>' + esc(p.name) + '</strong> <span class="muted">' + esc(p.age + ' / ' + p.sex) + '</span></div>' +
+      : '<div class="p-id"><div class="p-name"><strong>' + esc(p.name) + '</strong> <span class="p-demo"><span title="Age">' + esc(p.age) + '</span><span title="Sex">' + esc(p.sex) + '</span></span></div>' +
         '<div class="muted">' + esc(p.phone) + '</div>' + (p.relation ? '<div class="rel">' + esc(p.relation) + ' (family account)</div>' : '') +
         '<div>' + (p.allergies.length ? p.allergies.map(function (x) { return '<span class="chip allergy">Allergy: ' + esc(x) + '</span>' }).join('') : '<span class="chip grey">No known allergies</span>') + '</div></div>'
     var vit = an
       ? vi('temp', 'Temp', '&deg;F', 4) + vi('pulse', 'Pulse', '/min', 3) + vi('rr', 'Resp', '/min', 3) + vi('weight', 'Weight', 'kg', 4) + '<div class="vi-n muted small">' + esc(DX.vnorm()) + '</div><div class="vi-err" id="wErr" role="alert"></div>'
       : vi('bp', 'BP', 'mmHg', 5) + vi('pulse', 'Pulse', '/min', 3) + vi('temp', 'Temp', '&deg;F', 4) + vi('weight', 'Weight', 'kg', 3) + vi('height', 'Height', 'cm', 3) +
         '<div class="vi"><span>BMI</span><span class="vin"><strong id="bmi">' + bmi() + '</strong><em>kg/m&sup2;</em></span></div>' + vi('spo2', 'SpO2', '%', 3) + '<div class="vi-err" id="wErr" role="alert"></div>'
-    $('#strip').innerHTML = '<span class="p-av' + (an ? ' vet' : '') + '" aria-hidden="true">' + esc(initials(an ? an.name : p.name)) + '</span>' + idb + '<div class="vitals">' + vit + '</div>'
+    $('#strip').innerHTML = '<span class="p-av' + (an ? ' vet' : '') + '" aria-hidden="true">' + esc(initials(an ? an.name : p.name)) + '</span>' + idb + '<div class="vitals' + (an ? ' an' : '') + '">' + vit + '</div>'
     weightErrSync()
   }
 
@@ -1597,15 +1597,13 @@
           '<p class="bn-p">উপরোক্ত রোগী ' + (r ? fmtY(r.from) : '') + ' থেকে স্বাভাবিক কাজে ফিরতে সক্ষম।</p>'
       body += row(o.ctype === 'rest' ? 'Remarks' : 'Restrictions', esc(o.remarks))
     }
-    return '<div class="sheet doc"><div class="sh-head"><div><h2>' + esc(d.name) + '</h2><div>' + esc(d.degrees) + ' &middot; ' + esc(specLine(d)) + '</div><div>' + esc(regLine(d)) + '</div></div>' +
-      '<div class="sh-r"><div>' + esc(d.chamber) + '</div><div>' + esc(d.chamberAddr) + '</div><div>Phone: ' + esc(d.phone) + '</div></div></div>' +
-      '<div class="sh-pat"><span><b>' + esc(p.name) + '</b>, ' + esc(p.age) + ' / ' + esc(p.sex) + '</span><span>Date: ' + fmtY(c.date) + '</span><span>Ref: ' + esc(no) + '</span></div>' +
-      '<h3 class="doc-t">' + title + '</h3><div class="doc-b">' + body + '</div>' +
-      '<div class="sh-foot"><div class="sh-qr">' + qrHtml(no + code) + '<div><div class="chkcode">Check code: ' + code + '</div><small>Linked to prescription ' + esc(c.no) + '</small></div></div><div class="sig"><div class="sigline"></div>' + esc(d.name) + '<br>' + esc(regShort(d)) + '</div></div></div>'
+    return '<div class="rxdoc"><section class="rp-page rp-letter">' + padHead(d) + padBar(padPatCells(p, c.date, ['REF', esc(no)])) +
+      '<div class="rp-lb"><h3 class="doc-t">' + title + '</h3><div class="doc-b">' + body + '</div>' + padSign(d, no, code, 'Check code &middot; linked to prescription ' + esc(c.no)) + '</div>' + padFoot(d) + '</section></div>'
   }
   function docModal(k, o, c) {
     openModal({ title: { ref: 'Referral letter', adm: 'Admission advice', cert: 'Medical certificate' }[k], cls: 'wide', body: '<div class="sheet-wrap">' + docHtml(k, o, c) + '</div>',
       foot: '<button class="btn ghost" data-act="printRx">Print</button><button class="btn ghost" data-act="closeModal">Close</button>' })
+    paginateSoon()
   }
   function xAllErrs() {
     var dr = S.draft, errs = []
@@ -1670,47 +1668,127 @@
     if (f.note) h += (h ? ' &middot; ' : '<b>F/U / পুনরায় দেখা করবেন:</b> ') + esc(f.note)
     return h
   }
+  /* ---------- printed prescription pad (A4, multi-page) ----------
+     Layout follows the doctor-prescription reference: tinted header (doctor + hotline), NAME / AGE / DATE bar,
+     tinted clinical-notes column on the left, Rx column with a watermark on the right, follow-up + signature at
+     the end and a chamber footer band. Content is a list of blocks per column; paginateRx() flows them over as
+     many A4 pages as needed and repeats header, bar and footer on every page. */
+  var PAD_ICO = {
+    steth: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H9v13a9 9 0 0 0 18 0V5h-3"/><path d="M18 27v5a10 10 0 0 0 20 0v-6"/><circle cx="38" cy="22" r="4"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>',
+    hosp: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" aria-hidden="true"><path d="M8 44V14h32v30"/><path d="M16 6h16v8H16z"/><path d="M24 7.5v5M21.5 10h5"/><path d="M14 20h5v5h-5zM29 20h5v5h-5zM14 30h5v5h-5zM29 30h5v5h-5z"/><path d="M20 44v-7h8v7"/><path d="M4 44h40"/></svg>'
+  }
+  function padHead(d) {
+    return '<header class="rp-head"><div class="rp-brand"><span class="rp-steth">' + PAD_ICO.steth + '</span><div class="rp-who"><h2 class="rp-name">' + esc(d.name) + '</h2>' +
+      '<div class="rp-qual">' + esc(d.degrees) + '</div><div class="rp-cert">' + esc(specLine(d)) + ' &middot; ' + esc(regLine(d)) + '</div></div></div>' +
+      '<div class="rp-hot"><span class="rp-hl">HOTLINE</span><div class="rp-ph">' + PAD_ICO.phone + esc(d.phone) + '</div>' + (d.nameBn ? '<div class="rp-bn">' + esc(d.nameBn) + '</div>' : '') + '</div></header>'
+  }
+  function padBar(cells) {
+    return '<div class="rp-bar">' + cells.map(function (c) { return '<span class="rp-k">' + c[0] + ':</span><span class="rp-v' + (c[2] ? ' ' + c[2] : '') + '">' + c[1] + '</span>' }).join('') + '</div>'
+  }
+  function padPatCells(p, date, ref) {
+    var a = animalOf(p), o = ownerOf(p)
+    var cells = a && o
+      ? [['PATIENT', esc(animalLine(a, S.draft ? S.draft.vitals.weight : '')), 'grow'], ['OWNER', esc(o.name)]]
+      : [['NAME', '<b>' + esc(p.name) + '</b>' + (p.relation ? ' <small>(' + esc(p.relation) + ')</small>' : ''), 'grow'], ['AGE', esc(p.age)], ['SEX', esc(p.sex)]]
+    cells.push(['DATE', fmtY(date)])
+    if (ref) cells.push([ref[0], '<span class="rp-no">' + ref[1] + '</span>'])
+    return cells
+  }
+  function padFoot(d) {
+    return '<footer class="rp-foot"><span class="rp-hosp">' + PAD_ICO.hosp + '</span><div class="rp-fa"><div class="rp-hn">' + esc(d.chamber) + '</div><div class="rp-ha">' + esc(d.chamberAddr) +
+      (d.chamberBn ? ' &middot; ' + esc(d.chamberBn) : '') + '</div></div><span class="rp-pg"></span></footer>'
+  }
+  function padSign(d, no, code, note) {
+    return '<div class="rp-sign"><div class="rp-qr">' + qrHtml(no + code) + '<div><div class="chkcode">' + code + '</div><small>' + note + '</small></div></div>' +
+      '<div class="sig"><div class="sigline"></div><b>' + esc(d.name) + '</b><br>' + esc(regShort(d)) + '</div></div>'
+  }
+  function padBlk(cls, html) { return '<div class="rp-b' + (cls ? ' ' + cls : '') + '">' + html + '</div>' }
   function sheetHtml0(final) {
-    var d = doc(), p = pat(), dr = S.draft, left = ''
+    var d = doc(), p = pat(), dr = S.draft, L = [], R = []
     S.sections.forEach(function (c) {
       if (c.hidden) return
       var def = secDef(c.id), t = ''
       if ((c.id === 'ph' || c.id === 'fh') && !S.printHist) return
-      if (def.kind === 'chips') t = dr.notes[c.id].map(function (x) { return esc(x.t) }).join('; ')
-      if (def.kind === 'tests') t = dr.tests.map(function (x) { return esc(x.t) }).join(', ')
-      if (def.kind === 'dx') t = dr.dx.map(function (x) { return esc(x.t) + ' <i>(' + DX_TYPES[x.type].charAt(0) + ')</i>' }).join('; ')
+      if (def.kind === 'chips') t = dr.notes[c.id].map(function (x) { return '<li>' + esc(x.t) + '</li>' }).join('')
+      if (def.kind === 'tests') t = dr.tests.map(function (x) { return '<li>' + esc(x.t) + '</li>' }).join('')
+      if (def.kind === 'dx') t = dr.dx.map(function (x) { return '<li>' + esc(x.t) + ' <i class="rp-dx">' + DX_TYPES[x.type] + '</i></li>' }).join('')
+      if (t) t = '<ul>' + t + '</ul>'
       if (def.kind === 'block') t = blockPrintHtml(def.bid)
       if (c.id === 'oe') {
         var v = dr.vitals, vt = []
-        if (v.bp) vt.push('BP ' + esc(v.bp)); if (v.pulse) vt.push('Pulse ' + esc(v.pulse)); if (v.temp) vt.push('Temp ' + esc(v.temp) + '&deg;F')
-        if (v.rr) vt.push('Resp ' + esc(v.rr) + '/min'); if (v.weight) vt.push('Wt ' + esc(v.weight) + ' kg'); if (bmi() !== '-') vt.push('BMI ' + bmi()); if (v.spo2) vt.push('SpO2 ' + esc(v.spo2) + '%')
-        t = (vt.join(' &middot; ') + (t ? '<br>' + t : ''))
+        if (v.bp) vt.push(['BP', esc(v.bp) + ' mmHg']); if (v.pulse) vt.push(['Pulse', esc(v.pulse) + ' /min']); if (v.temp) vt.push(['Temp', esc(v.temp) + ' &deg;F'])
+        if (v.rr) vt.push(['Resp', esc(v.rr) + ' /min']); if (v.weight) vt.push(['Weight', esc(v.weight) + ' kg']); if (v.height) vt.push(['Height', esc(v.height) + ' cm'])
+        if (bmi() !== '-') vt.push(['BMI', bmi() + ' kg/m&sup2;']); if (v.spo2) vt.push(['SpO2', esc(v.spo2) + ' %'])
+        t = (vt.length ? '<div class="rp-vit">' + vt.map(function (x) { return '<span><b>' + x[0] + ':</b> ' + x[1] + '</span>' }).join('') + '</div>' : '') + t
       }
-      if (c.id === 'oi' && dr.res.length) t += (t ? '<br>' : '') + dr.res.map(resPrint).join('<br>')
-      if (t) left += '<div class="pl-sec"><b>' + (def.kind === 'tests' ? 'Exam / Inv' : def.abbr) + '</b> ' + t + '</div>'
+      if (c.id === 'oi' && dr.res.length) t += '<div class="rp-res">' + dr.res.map(resPrint).join('<br>') + '</div>'
+      if (t) L.push(padBlk('rp-sec', '<div class="rp-sl">' + esc(def.title) + (def.abbr ? ' <abbr>' + esc(def.abbr) + '</abbr>' : '') + ':</div><div class="rp-sv">' + t + '</div>'))
     })
-    var meds = dr.lines.map(function (l, i) {
-      if (isStop(l)) return '<li class="pm-stop"><div class="pm-n">' + (i + 1) + '.</div><div><b>বন্ধ করুন / STOP: ' + esc(lineName(l)) + '</b>' + (l.stopReason ? '<div class="pm-i">' + esc(l.stopReason) + '</div>' : '') + '</div></li>'
-      return '<li><div class="pm-n">' + (i + 1) + '.</div><div><b>' + esc(lineName(l)) + '</b> <span>' + esc(l.form) + '</span>' + (l.kind === 'CONT' ? ' <span class="pm-cont">চলবে / Continue</span>' : '') + (l.generic ? '<small>' + esc(l.generic) + '</small>' : '') +
-        '<div class="pm-f">' + freqBn(l) + '</div>' + extrasBn(l) + l.instrs.map(function (t) { return '<div class="pm-i">' + esc(t) + '</div>' }).join('') + (l.caution ? '<div class="pm-i">&#9888; ' + esc(l.caution) + '</div>' : '') + '</div></li>'
-    }).join('')
-    var adv = !secOn('advice') ? '' : dr.libAdvice.map(function (id) { var a = D.adviceLibrary.filter(function (x) { return x.id === id })[0]; return '<li>' + esc(a.bn) + ' <small>' + esc(a.en) + '</small></li>' }).join('') +
-      dr.notes.advice.map(function (x) { return '<li>' + esc(x.t) + '</li>' }).join('')
-    var fu = !secOn('fu') ? '' : fuSheet()
-    var code = final ? final.code : 'XXXX-XXXX'
-    return '<div class="sheet"><div class="sh-head"><div><h2>' + esc(d.name) + '</h2><div>' + esc(d.degrees) + ' &middot; ' + esc(specLine(d)) + '</div><div>' + esc(regLine(d)) + '</div></div>' +
-      '<div class="sh-r"><div>' + esc(d.chamber) + '</div><div>' + esc(d.chamberAddr) + '</div><div>Phone: ' + esc(d.phone) + '</div></div></div>' +
-      sheetTitle() + '<div class="sh-pat">' + patSpan(p) + '<span>Date: ' + fmtY(D.today) + '</span><span>Rx No: ' + esc(dr.rxNo) + (dr.continued ? ' (v' + dr.continued.next + ')' : '') + '</span></div>' +
-      '<div class="sh-cols"><div class="sh-l">' + (left || '<span class="muted">No notes</span>') + '</div><div class="sh-rx"><div class="rxs big">&#8478;</div>' + rxLabelHtml() + '<ol>' + (meds || (medOn() ? '<li class="muted">No medicines</li>' : planLis())) + '</ol></div></div>' +
-      (medOn() ? ordBlock(dr.orders) : '') + refBlock(dr) + (adv ? '<div class="sh-adv"><b>Adv / পরামর্শ</b><ul>' + adv + '</ul></div>' : '') + (fu ? '<div class="sh-fu">' + fu + '</div>' : '') +
-      '<div class="sh-foot"><div class="sh-qr">' + qrHtml(dr.rxNo + code) + '<div><div class="chkcode">Check code: ' + code + '</div><small>Verify at pharmaz247.example/verify</small></div></div><div class="sig"><div class="sigline"></div>' + esc(d.name) + '<br>' + esc(regShort(d)) + '</div></div></div>'
+    if (!L.length) L.push(padBlk('rp-sec', '<div class="rp-sl">Clinical notes:</div><div class="rp-sv rp-none">None recorded</div>'))
+    R.push(padBlk('rp-rxh', '<span class="rp-rx">R<sub>x</sub></span>' + rxLabelHtml() + sheetTitle()))
+    dr.lines.forEach(function (l, i) {
+      if (isStop(l)) return R.push(padBlk('rp-med pm-stop', '<span class="rp-n">' + (i + 1) + '.</span><div><b>বন্ধ করুন / STOP: ' + esc(lineName(l)) + '</b>' + (l.stopReason ? '<div class="pm-i">' + esc(l.stopReason) + '</div>' : '') + '</div>'))
+      R.push(padBlk('rp-med', '<span class="rp-n">' + (i + 1) + '.</span><div><div class="rp-mn"><b>' + esc(lineName(l)) + '</b> <span>' + esc(l.form) + '</span>' + (l.kind === 'CONT' ? ' <span class="pm-cont">চলবে / Continue</span>' : '') + (l.generic ? ' <small>' + esc(l.generic) + '</small>' : '') + '</div>' +
+        '<div class="pm-f">' + freqBn(l) + '</div>' + extrasBn(l) + l.instrs.map(function (t) { return '<div class="pm-i">' + esc(t) + '</div>' }).join('') + (l.caution ? '<div class="pm-i">&#9888; ' + esc(l.caution) + '</div>' : '') + '</div>'))
+    })
+    if (!dr.lines.length) R.push(padBlk('rp-none', medOn() ? 'No medicines' : '<ul class="rp-plan">' + planLis() + '</ul>'))
+    var ob = medOn() ? ordBlock(dr.orders) : '', rb = refBlock(dr)
+    if (ob) R.push(padBlk('rp-x', ob)); if (rb) R.push(padBlk('rp-x', rb))
+    var adv = !secOn('advice') ? [] : dr.libAdvice.map(function (id) { var a = D.adviceLibrary.filter(function (x) { return x.id === id })[0]; return a ? esc(a.bn) + (a.en ? ' <small>' + esc(a.en) + '</small>' : '') : '' }).filter(Boolean)
+      .concat(dr.notes.advice.map(function (x) { return esc(x.t) }))
+    adv.forEach(function (t, k) { R.push(padBlk('rp-adv', (k ? '' : '<div class="rp-h">Adv / পরামর্শ</div>') + '<div class="rp-ai">' + t + '</div>')) })
+    var fu = !secOn('fu') ? '' : fuSheet(), code = final ? final.code : 'XXXX-XXXX'
+    R.push(padBlk('rp-end', '<div class="rp-fu">' + (fu || '<b>Follow-up after</b> <span class="rp-dots"></span> day(s) / month(s)') + '</div>' + padSign(d, dr.rxNo, code, 'Check code &middot; verify at pharmaz247.example/verify')))
+    var ref = ['RX NO', esc(dr.rxNo) + (dr.continued ? ' (v' + dr.continued.next + ')' : '')]
+    return '<div class="rxdoc"><section class="rp-page">' + padHead(d) + padBar(padPatCells(p, D.today, ref)) +
+      '<div class="rp-body"><div class="rp-l">' + L.join('') + '</div><div class="rp-r">' + R.join('') + '</div></div>' + padFoot(d) + '</section></div>'
+  }
+  // Flow the blocks of every .rxdoc inside root over A4 pages. Safe to call again (e.g. after fonts load).
+  function paginateRx(root) {
+    ;[].slice.call((root || document).querySelectorAll('.rxdoc')).forEach(function (docEl) {
+      var pages = docEl.querySelectorAll('.rp-page'), first = pages[0]
+      if (!first || !first.querySelector('.rp-l')) return
+      var L = [], R = []
+      ;[].forEach.call(pages, function (pg) { L = L.concat([].slice.call(pg.querySelectorAll('.rp-l > .rp-b'))); R = R.concat([].slice.call(pg.querySelectorAll('.rp-r > .rp-b'))) })
+      var tpl = first.cloneNode(true)
+      tpl.classList.remove('rp-more')
+      tpl.querySelector('.rp-l').innerHTML = ''; tpl.querySelector('.rp-r').innerHTML = ''
+      ;[].forEach.call(tpl.querySelectorAll('.rp-cont'), function (x) { x.remove() })
+      docEl.innerHTML = ''
+      function fill(col, q) {
+        while (q.length) {
+          col.appendChild(q[0])
+          // a block taller than a whole page stays (clipped) so every page always takes at least one block
+          if (col.scrollHeight > col.clientHeight + 1 && col.querySelectorAll(':scope > .rp-b').length > 1) { col.removeChild(q[0]); break }
+          q.shift()
+        }
+      }
+      var out = []
+      while (L.length || R.length || !out.length) {
+        var pg = tpl.cloneNode(true); docEl.appendChild(pg); out.push(pg)
+        if (out.length > 1) pg.classList.add('rp-more')
+        var rc = pg.querySelector('.rp-r')
+        if (R.length && out.length > 1) { var m = document.createElement('div'); m.className = 'rp-cont-top'; m.textContent = 'Rx continued from page ' + (out.length - 1); rc.appendChild(m) }
+        fill(pg.querySelector('.rp-l'), L); fill(rc, R)
+      }
+      out.forEach(function (pg, i) {
+        pg.querySelector('.rp-pg').textContent = 'Page ' + (i + 1) + ' of ' + out.length
+        if (i < out.length - 1) { var m = document.createElement('div'); m.className = 'rp-cont'; m.textContent = 'Continued on page ' + (i + 2) + ' →'; pg.querySelector('.rp-body').appendChild(m) }
+      })
+    })
+  }
+  function paginateSoon() {
+    paginateRx($('#modalRoot'))
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { paginateRx($('#modalRoot')) })
   }
   function previewModal() {
     var dr = S.draft, hs = histSkipped()
     var opt = '<div class="pv-opt"><div class="pv-o"><span><b>Digits on the patient part</b> (directions, duration, follow-up)</span><div class="seg" role="group" aria-label="Digits"><button class="' + (dr.bnd ? 'on' : '') + '" data-act="bndSet" data-v="1">বাংলা ১২৩</button><button class="' + (dr.bnd ? '' : 'on') + '" data-act="bndSet" data-v="0">English 123</button></div> ' + (S.bndDefault === dr.bnd ? '<span class="muted small">your default</span>' : '<button class="link" data-act="bndDefault">Make this my default</button>') + '</div>' +
       '<label class="chk-i"><input type="checkbox" data-act="printHist"' + (S.printHist ? ' checked' : '') + '> Also print long history (P/H, F/H)' + (hs.length ? ' <span class="muted small">- ' + esc(hs.join(', ')) + ' not printed now; kept in the record and the patient view</span>' : '') + '</label></div>'
-    openModal({ title: 'Prescription preview (A4)', cls: 'wide', body: opt + '<div class="sheet-wrap">' + sheetHtml() + '</div><p class="muted small center">Preview only - the real QR and check code are generated when you complete.</p>',
+    openModal({ title: 'Prescription preview (A4)', cls: 'wide', body: opt + '<div class="sheet-wrap">' + sheetHtml() + '</div><p class="muted small center">Preview only - the real QR and check code are generated when you complete. Long prescriptions continue on extra pages; the header, patient bar and footer repeat on each page.</p>',
       foot: '<button class="btn ghost" data-act="printRx">Print</button><button class="btn ghost" data-act="closeModal">Back to editing</button><button class="btn primary" data-act="complete">Complete</button>' })
+    paginateSoon()
   }
   function completeModal() {
     var dr = S.draft, wc = warnCounts(), own = ownRxs(), ac = allergyCounts()

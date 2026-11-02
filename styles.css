@@ -601,9 +601,19 @@ main:focus { outline: 0; }
 .strip { align-items: center; gap: 1rem 1.5rem; padding: 1rem 1.2rem; margin-top: .75rem; border-left: 4px solid var(--accent); }
 .p-id { display: grid; gap: .15rem; }
 .p-name strong { font-size: 1.2rem; }
+/* age and sex drive dosing, so they read as badges next to the name, not muted text */
+.p-name { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.p-demo { display: inline-flex; gap: .3rem; }
+.p-demo > span { background: #eef1fd; border: 1px solid #d6dcf3; color: var(--ink); border-radius: 999px; padding: .1rem .6rem; font-size: .95rem; font-weight: 700; white-space: nowrap; }
 .vitals { gap: .5rem; }
 /* vitals read inline: "BP: 140/90 mmHg" */
 .vitals { align-items: center; justify-content: flex-end; }
+/* vitals laid out in two rows: 4 columns for people (7 items = 4 + 3), 2 for animals (4 items = 2 + 2) */
+.vitals { display: grid; grid-template-columns: repeat(4, auto); }
+.vitals.an { grid-template-columns: repeat(2, auto); }
+.vitals .vi-err, .vitals .vi-n { grid-column: 1 / -1; }
+.vitals .vi-n { text-align: right; }
+@media (max-width: 560px) { .vitals { grid-template-columns: repeat(2, auto); justify-content: stretch; } }
 .vi { display: inline-flex; align-items: center; gap: .35rem; background: #f7f8fc; border: 1px solid var(--line-2); border-radius: 10px; padding: .3rem .6rem; font-size: .88rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
 .vi > span:first-child::after { content: ":"; }
 .vi .vin { align-items: center; gap: .3rem; font-weight: 400; }
@@ -706,3 +716,100 @@ main:focus { outline: 0; }
 .tplbar select { max-width: 320px; }
 .proto { bottom: 16px; }
 body[data-view="consult"] .proto { bottom: 78px; }
+
+/* =====================================================================
+   Printed prescription pad (A4, multi-page) - layout from doctor-prescription.avif
+   ===================================================================== */
+.rxdoc { --rp: #1576c2; --rp-d: #0d4f8a; --rp-tint: #e6f4fc; --rp-line: #a9d6f0; display: grid; gap: 20px; justify-content: center; }
+.sheet-wrap { background: #c9d3dc; padding: 20px; border-radius: 10px; }
+.rp-page { position: relative; width: 210mm; height: 297mm; overflow: hidden; display: flex; flex-direction: column; background: #fff; color: #15202b; font-family: var(--font); font-size: 12.5px; line-height: 1.45; box-shadow: 0 4px 18px rgba(0, 0, 0, .22); page: rxpad; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.rp-page small { display: inline; color: #5b6b7a; font-size: .86em; }
+
+/* header */
+.rp-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; background: var(--rp-tint); padding: 22px 30px 18px; }
+.rp-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.rp-steth svg { width: 56px; height: 56px; color: #1b2a3a; display: block; }
+.rp-name { margin: 0; font-size: 28px; line-height: 1.1; font-weight: 800; color: var(--rp); letter-spacing: -.01em; }
+.rp-qual { display: inline-block; margin-top: 4px; padding-bottom: 3px; font-size: 10.5px; letter-spacing: .22em; text-transform: uppercase; color: #2b3540; border-bottom: 2px solid; border-image: linear-gradient(90deg, var(--rp), rgba(21, 118, 194, 0)) 1; }
+.rp-cert { margin-top: 3px; font-size: 10.5px; color: #4d5b68; }
+.rp-hot { flex: none; align-self: stretch; display: flex; flex-direction: column; justify-content: center; align-items: center; border-left: 2px solid var(--rp); padding-left: 22px; }
+.rp-hl { background: var(--rp); color: #fff; font-weight: 800; letter-spacing: .14em; font-size: 13px; padding: 2px 10px; border-radius: 3px; }
+.rp-ph { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 14px; font-weight: 600; }
+.rp-ph svg { width: 14px; height: 14px; }
+.rp-bn { margin-top: 3px; font-size: 11px; color: #4d5b68; }
+
+/* NAME / AGE / DATE bar */
+.rp-bar { display: flex; align-items: stretch; border-top: 2px solid var(--rp); border-bottom: 2px solid var(--rp); }
+.rp-k { display: flex; align-items: center; background: var(--rp); color: #fff; font-weight: 800; font-size: 11.5px; letter-spacing: .04em; padding: 5px 10px; white-space: nowrap; }
+.rp-v { display: flex; align-items: center; gap: 4px; padding: 5px 10px; white-space: nowrap; }
+.rp-v.grow { flex: 1; white-space: normal; min-width: 0; }
+.rp-no { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+
+/* two columns */
+.rp-body { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 31% 1fr; }
+.rp-l { overflow: hidden; display: flex; flex-direction: column; gap: 12px; background: var(--rp-tint); border-right: 2px solid var(--rp); padding: 16px 14px 20px; }
+.rp-r { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; gap: 11px; padding: 14px 24px 22px; }
+.rp-r::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .9;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='43' fill='none' stroke='%23e1f1fb' stroke-width='9' stroke-dasharray='56.5 11'/%3E%3Cpath d='M39 20h22v19h19v22H61v19H39V61H20V39h19z' fill='%23e6f4fc'/%3E%3C/svg%3E") center 52% / 250px no-repeat; }
+.rp-sl { font-weight: 700; color: var(--rp-d); font-size: 12px; }
+.rp-sl abbr { text-decoration: none; font-weight: 600; font-size: 10px; color: #6b8aa5; }
+.rp-sv { margin-top: 2px; }
+.rp-sv ul { list-style: disc; padding-left: 15px; margin: 0; }
+.rp-sv li { margin: 1px 0; }
+.rp-vit { display: grid; gap: 1px; }
+.rp-vit b { color: #2b3540; }
+.rp-dx { font-style: normal; font-size: 9.5px; font-weight: 600; color: var(--rp-d); border: 1px solid var(--rp-line); border-radius: 3px; padding: 0 3px; }
+.rp-res { margin-top: 3px; font-size: 11.5px; }
+.rp-none { color: #7a8794; font-style: italic; }
+.rp-l .gl { border-collapse: collapse; font-size: 11px; } .rp-l .gl th, .rp-l .gl td { border: 1px solid #9ab; padding: 1px 5px; }
+
+/* Rx column */
+.rp-rxh { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.rp-rx { font-family: "Segoe Script", "Brush Script MT", "Lucida Handwriting", cursive; font-size: 40px; line-height: 1; color: var(--rp-d); }
+.rp-rx sub { font-size: 22px; }
+.rp-rxh .sh-title, .rp-rxh .sh-vet { flex-basis: 100%; text-align: left; }
+.rp-med { display: flex; gap: 8px; }
+.rp-n { flex: none; min-width: 18px; font-weight: 700; color: var(--rp-d); }
+.rp-mn b { font-size: 13.5px; }
+.rp-med .pm-f { margin-top: 1px; }
+.rp-med.pm-stop b { color: #8a1c14; }
+.rp-x .sh-adv { border-top: 1px dashed var(--rp-line); margin: 0; padding-top: 6px; }
+.rp-x .sh-adv > b, .rp-adv .rp-h { color: var(--rp-d); font-weight: 700; }
+.rp-adv { margin-top: -6px; }
+.rp-adv .rp-h { border-top: 1px dashed var(--rp-line); padding-top: 7px; margin: 6px 0 2px; }
+.rp-ai { padding-left: 12px; position: relative; } .rp-ai::before { content: "\2022"; position: absolute; left: 1px; color: var(--rp); }
+.rp-end { margin-top: auto; padding-top: 6px; }
+.rp-fu { border-top: 1px dashed var(--rp-line); padding-top: 8px; text-align: right; }
+.rp-dots { display: inline-block; width: 90px; border-bottom: 1.5px dotted #333; }
+.rp-sign { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-top: 16px; }
+.rp-qr { display: flex; align-items: flex-end; gap: 8px; }
+.rp-qr .qr { width: 78px; height: 78px; margin: 0; }
+.rp-qr .chkcode { font-size: 13px; margin: 0; }
+.rp-qr small { display: block; font-size: 9.5px; max-width: 170px; }
+.rp-sign .sig { font-size: 11px; }
+.rp-cont-top { font-size: 10.5px; color: #5b6b7a; font-style: italic; }
+.rp-cont { position: absolute; right: 24px; bottom: 6px; font-size: 10px; font-style: italic; color: #5b6b7a; }
+
+/* footer band */
+.rp-foot { display: flex; align-items: center; gap: 14px; padding: 12px 30px; border-top: 2px solid var(--rp); background: repeating-linear-gradient(90deg, #dff0fa 0 2px, #eef8fd 2px 5px); }
+.rp-hosp svg { display: block; width: 42px; height: 42px; color: var(--rp); }
+.rp-fa { min-width: 0; }
+.rp-hn { font-size: 19px; font-weight: 800; line-height: 1.15; color: var(--rp); text-transform: uppercase; }
+.rp-ha { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: #2b3540; }
+.rp-pg { margin-left: auto; flex: none; font-size: 10px; color: #4d5b68; }
+
+/* referral / admission / certificate letters */
+.rp-lb { flex: 1; display: flex; flex-direction: column; padding: 18px 40px 24px; }
+.rp-lb .rp-sign { margin-top: auto; }
+
+@page rxpad { size: A4; margin: 0; }
+@media print {
+  body.printing { background: #fff; }
+  body.printing .backdrop { animation: none; backdrop-filter: none; }
+  body.printing .modal { display: block; max-height: none; overflow: visible; border-radius: 0; animation: none; }
+  body.printing .modal-b { overflow: visible; padding: 0; }
+  body.printing .modal-b > :not(.sheet-wrap) { display: none; }
+  body.printing .rxdoc { display: block; }
+  body.printing .rp-page { box-shadow: none; break-after: page; }
+  body.printing .rp-page:last-child { break-after: auto; }
+}
