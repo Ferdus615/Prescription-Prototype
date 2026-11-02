@@ -511,7 +511,7 @@ window.DATA = {
       parts: [
         { h: 'How to open it', ul: ['Double-click **index.html** in the prescription-module folder. Use a laptop-size window. A tablet works too.', 'All changes stay in memory. Reload the page, or press **Reset demo data**, to start again.', 'Bangla text uses your system font.', 'Buttons for things that are out of scope show a small message: "Prototype: not built".'] },
         { h: 'Prototype controls (dashed box, bottom-left)', ul: [
-          'This box is not part of the product. It only helps you test. Click the minus to fold it. Click **Prototype controls** to open it again.',
+          'This box is not part of the product. It only helps you test. It starts folded: click **Prototype controls** (bottom-left) to open it, and the minus to fold it again.',
           '**Logged-in doctor**: pick one of 9 doctors. Each has their own appointments, form template, print header and prescribing status.',
           '**Platform admin**: two switches for the current doctor, **Prescription enabled** and **Medicine prescribing enabled**. In the real product only the platform admin can change these.',
           '**Scenario (Dr. Farhana)**: **Returning patient**, **First visit**, **Family member**. Picking one opens that consultation. It only shows for Dr. Farhana.',

@@ -17,7 +17,7 @@
     seq: 1, rxCounter: 51, draft: null, popupQ: [], sg: null, savedAt: null, tplTab: 'condition', drawerRx: null,
     tpl: JSON.parse(JSON.stringify(D.medTemplates)), instr: D.instrFormats.slice(),
     sections: D.sections.map(function (s) { return { id: s.id, hidden: false, collapsed: false } }), customSecs: [], secOverride: {}, saved: JSON.parse(JSON.stringify(D.noteSuggest)), msSel: null,
-    ordMine: JSON.parse(JSON.stringify(D.orderSuggest.mine)), ordTab: 'diet', vf: { rx: '', code: '', result: null }, pv: null, showErr: false, protoOpen: true, lastIssued: null,
+    ordMine: JSON.parse(JSON.stringify(D.orderSuggest.mine)), ordTab: 'diet', vf: { rx: '', code: '', result: null }, pv: null, showErr: false, protoOpen: false, lastIssued: null,
     bndDefault: true, printHist: false, pvDig: null, lib: { cat: 'all', form: null }, slotDay: null
   }
 
@@ -576,18 +576,40 @@
     else renderPatient()
     window.scrollTo(0, 0)
   }
+  /* small inline icons (stroke = currentColor) */
+  var ICO = {
+    cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+    next: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
+    bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>'
+  }
+  function ico(n) { return '<svg class="ico-s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICO[n] + '</svg>' }
+  function tagCls(t) { return 'tag t-' + String(t || '').toLowerCase().replace(/[^a-z]+/g, '-') }
   function renderAppointments() {
-    var rows = D.appointments.filter(function (a) { return a.doc === S.doc && (!a.date || a.date === D.today) }).map(function (a) {
+    var list = D.appointments.filter(function (a) { return a.doc === S.doc && (!a.date || a.date === D.today) })
+    var nDone = list.filter(function (a) { return a.status === 'Done' }).length, waiting = list.filter(function (a) { return a.status !== 'Done' })
+    var nxt = waiting[0]
+    var rows = list.map(function (a) {
       var p = D.patients[a.patientId], done = a.status === 'Done'
-      return '<li class="appt"><div class="serial">#' + a.serial + '<small>' + a.time + '</small></div>' +
-        '<div class="a-main"><strong>' + esc(p.name) + '</strong> <span class="muted">' + esc(p.age + ' / ' + p.sex) + '</span>' +
-        (a.tag ? ' <span class="tag">' + esc(a.tag) + '</span>' : '') +
-        '<div class="muted">' + esc(a.reason) + (p.relation ? ' &middot; ' + esc(p.relation) : '') + ownerTag(p) + '</div></div>' +
+      return '<li class="appt' + (done ? ' is-done' : '') + (nxt === a ? ' is-next' : '') + '"><div class="serial">#' + a.serial + '<small>' + a.time + '</small></div>' +
+        '<div class="a-who"><span class="p-av sm" aria-hidden="true">' + esc(initials(p.name)) + '</span><div class="a-main"><strong>' + esc(p.name) + '</strong> <span class="muted">' + esc(p.age + ' / ' + p.sex) + '</span>' +
+        (a.tag ? ' <span class="' + tagCls(a.tag) + '">' + esc(a.tag) + '</span>' : '') + (nxt === a ? ' <span class="tag t-next">Next up</span>' : '') +
+        '<div class="muted">' + esc(a.reason) + (p.relation ? ' &middot; ' + esc(p.relation) : '') + ownerTag(p) + '</div></div></div>' +
         '<span class="status ' + a.status.toLowerCase() + '">' + a.status + '</span>' +
         '<button class="btn ' + (done ? 'ghost' : 'primary') + '" data-act="' + (done ? 'viewDone' : 'openAppt') + '" data-serial="' + a.serial + '">' + (done ? 'View' : 'Open consultation') + '</button></li>'
     }).join('')
-    $('#view').innerHTML = '<div class="page narrow"><div class="page-h"><div><h1>Today\'s appointments</h1><p class="muted">Wednesday, 21 Oct 2026 &middot; ' + esc(doc().chamber) + '</p></div>' +
-      '<button class="btn ghost" data-act="nyi" data-w="Walk-in registration">+ Add walk-in</button></div>' + (S.welcomeOff ? '' : '<div class="g-welcome" role="region" aria-label="Welcome"><div><strong>New here?</strong> Open the guide - start with the 5-minute tour. It explains this prototype and takes you to each feature.</div><div class="g-wb"><button class="btn primary sm" data-act="gOpen" data-id="start">Open the guide</button><button class="icon-btn" data-act="gWelcomeOff" aria-label="Dismiss the welcome card" title="Dismiss">&times;</button></div></div>') + '<ul class="appts">' + rows + '</ul></div>'
+    function stat(cls, icon, n, label, sub) { return '<div class="stat ' + cls + '"><span class="stat-i">' + ico(icon) + '</span><div class="stat-t"><b>' + label + '</b><small>' + sub + '</small></div><span class="stat-n">' + n + '</span></div>' }
+    var stats = '<div class="stats">' + stat('s-navy', 'cal', list.length, 'Today\'s appointments', 'Scheduled for today') + stat('s-green', 'clock', waiting.length, 'Waiting', 'Checked in, to be seen') +
+      stat('s-violet', 'check', nDone, 'Completed', 'Consultations done') + stat('s-amber', 'next', nxt ? nxt.time : '&ndash;', 'Next up', nxt ? esc(D.patients[nxt.patientId].name) + ' &middot; #' + nxt.serial : 'Queue is clear') + '</div>'
+    $('#view').innerHTML = '<div class="page"><div class="page-h"><div><h1>Today\'s appointments</h1><p class="muted">Wednesday, 21 Oct 2026 &middot; ' + esc(doc().chamber) + '</p></div>' +
+      '<div class="page-ha"><button class="btn" data-act="gOpen" data-id="start">' + ico('book') + ' Guide</button><button class="btn success" data-act="nyi" data-w="Walk-in registration">' + ico('plus') + ' Add walk-in</button></div></div>' +
+      (S.welcomeOff ? '' : '<div class="g-welcome" role="region" aria-label="Welcome"><span class="g-wi" aria-hidden="true">' + ico('bulb') + '</span><div><strong>New here?</strong> Open the guide &mdash; start with the 5-minute tour. It explains this prototype and takes you to each feature.</div><div class="g-wb"><button class="btn primary sm" data-act="gOpen" data-id="start">Open the guide</button><button class="icon-btn" data-act="gWelcomeOff" aria-label="Dismiss the welcome card" title="Dismiss">&times;</button></div></div>') +
+      stats + '<section class="queue"><div class="queue-h"><h2>Queue</h2><span class="muted small">' + list.length + ' patient' + (list.length === 1 ? '' : 's') + ' &middot; ' + waiting.length + ' waiting</span></div>' +
+      (rows ? '<ul class="appts">' + rows + '</ul>' : '<div class="empty">No appointments today.</div>') + '</section></div>'
   }
 
   /* ---------- consult skeleton ---------- */
@@ -622,7 +644,7 @@
       ? vi('temp', 'Temp', '&deg;F', 4) + vi('pulse', 'Pulse', '/min', 3) + vi('rr', 'Resp', '/min', 3) + vi('weight', 'Weight', 'kg', 4) + '<div class="vi-n muted small">' + esc(DX.vnorm()) + '</div><div class="vi-err" id="wErr" role="alert"></div>'
       : vi('bp', 'BP', 'mmHg', 5) + vi('pulse', 'Pulse', '/min', 3) + vi('temp', 'Temp', '&deg;F', 4) + vi('weight', 'Weight', 'kg', 3) + vi('height', 'Height', 'cm', 3) +
         '<div class="vi"><span>BMI</span><span class="vin"><strong id="bmi">' + bmi() + '</strong><em>kg/m&sup2;</em></span></div>' + vi('spo2', 'SpO2', '%', 3) + '<div class="vi-err" id="wErr" role="alert"></div>'
-    $('#strip').innerHTML = idb + '<div class="vitals">' + vit + '</div>'
+    $('#strip').innerHTML = '<span class="p-av' + (an ? ' vet' : '') + '" aria-hidden="true">' + esc(initials(an ? an.name : p.name)) + '</span>' + idb + '<div class="vitals">' + vit + '</div>'
     weightErrSync()
   }
 
@@ -1872,7 +1894,7 @@
   /* ---------- prototype panel ---------- */
   function renderProto() {
     var el = $('#proto')
-    if (!S.protoOpen) { el.innerHTML = '<button class="p-toggle" data-act="ptoggle">Prototype controls</button>'; return }
+    if (!S.protoOpen) { el.innerHTML = '<button class="p-toggle" data-act="ptoggle" aria-expanded="false" title="Scenario, doctor, clock and warning style">&#9881; Prototype controls</button>'; return }
     el.innerHTML = '<div class="p-h"><strong>Prototype controls</strong><button class="icon-btn" data-act="ptoggle" aria-label="Collapse">&minus;</button></div><p class="muted small">Not part of the product.</p>' + docFieldset() +
       '<fieldset' + (S.doc === 'd1' ? '' : ' class="hid"') + '><legend>Scenario (Dr. Farhana)</legend>' + [['returning', 'Returning patient'], ['first', 'First visit'], ['family', 'Family member']].map(function (s) {
         return '<label><input type="radio" name="scen" data-act="scen" value="' + s[0] + '"' + (S.scenario === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>'
