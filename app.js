@@ -796,12 +796,13 @@
   function fuUnitLabel(unit, n) { var u = unit || 'days'; return num(n) === 1 ? u.slice(0, -1) : u }
   function followDue() {
     var f = S.draft.fu, n = num(f.n); if (!n) return null
-    if (f.unit === 'weeks') return addDays(TODAY, n * 7)
+    var t0 = pd(D.today) /* the visit date: today, or the issue date when a past prescription is re-drawn (rxPadOf) */
+    if (f.unit === 'weeks') return addDays(t0, n * 7)
     if (f.unit === 'months') { // calendar months; a day the target month lacks rolls to its last day (31 Jan + 1 month = 28/29 Feb)
-      var day = TODAY.getDate(), x = new Date(TODAY.getFullYear(), TODAY.getMonth() + n, 1)
+      var day = t0.getDate(), x = new Date(t0.getFullYear(), t0.getMonth() + n, 1)
       x.setDate(Math.min(day, new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate())); return x
     }
-    return addDays(TODAY, n)
+    return addDays(t0, n)
   }
   function followDate() { var d = followDue(); return d ? fmtY(d) : '' }
   function followText() { var f = S.draft.fu; return num(f.n) ? 'after ' + num(f.n) + ' ' + fuUnitLabel(f.unit, f.n) + ' (' + followDate() + ')' : '' }
@@ -2986,7 +2987,9 @@
     if (rx.draftJson) { S.draft = JSON.parse(rx.draftJson); S.draft.rxNo = rx.no; return S.draft }
     var dr = S.draft = newDraft(pat())
     dr.rxNo = rx.no; dr.bnd = rx.bnd !== false
-    if (rx.snap && rx.snap.vitals) dr.vitals = Object.assign({}, dr.vitals, rx.snap.vitals)
+    // newDraft pre-fills today's visit (record chips, last-visit history, check-in vitals): wipe that, only what was issued counts
+    Object.keys(dr.notes).forEach(function (k) { dr.notes[k] = [] })
+    dr.vitals = Object.assign({ bp: '', pulse: '', temp: '', weight: '', height: '', spo2: '', rr: '' }, rx.snap && rx.snap.vitals)
     rx.lines.forEach(function (hl) {
       var l
       if (hl.stop) { l = hl.medId ? lineFrom(hl.medId) : freeLine(hl.name); l.kind = 'STOP'; l.stopReason = hl.reason || '' } else l = lineFromHist(hl, rx)
