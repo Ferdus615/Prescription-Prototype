@@ -1599,7 +1599,7 @@
           '<p class="bn-p">উপরোক্ত রোগী ' + (r ? fmtY(r.from) : '') + ' থেকে স্বাভাবিক কাজে ফিরতে সক্ষম।</p>'
       body += row(o.ctype === 'rest' ? 'Remarks' : 'Restrictions', esc(o.remarks))
     }
-    return '<div class="rxdoc"><section class="rp-page rp-letter">' + padHead(d) + padBar(padPatCells(p, c.date, ['REF', esc(no)])) +
+    return '<div class="rxdoc"><section class="rp-page rp-letter">' + padHead(d, padPatCells(p, c.date, ['REF', esc(no)])) +
       '<div class="rp-lb"><h3 class="doc-t">' + title + '</h3><div class="doc-b">' + body + '</div>' + padSign(d, no, code, 'Check code &middot; linked to prescription ' + esc(c.no)) + '</div>' + padFoot(d) + '</section></div>'
   }
   function docModal(k, o, c) {
@@ -1678,15 +1678,16 @@
   var PAD_ICO = {
     phone: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>'
   }
-  // Clean header: doctor block on the left (name, degrees, speciality/reg, phone), Bangla name on the right. No logo, no hotline box.
-  function padHead(d) {
+  // Clean header: doctor block on the left (name, degrees, speciality/reg, phone), patient card on the right
+  // (name / age / sex / date / ref from padPatCells). No logo, no hotline box, no separate patient bar.
+  function padHead(d, cells) {
     return '<header class="rp-head"><div class="rp-who"><h2 class="rp-name">' + esc(d.name) + '</h2>' +
       '<div class="rp-qual">' + esc(d.degrees) + '</div><div class="rp-cert">' + esc(specLine(d)) + ' &middot; ' + esc(regLine(d)) + '</div>' +
       (d.phone ? '<div class="rp-ph">' + PAD_ICO.phone + esc(d.phone) + '</div>' : '') + '</div>' +
-      (d.nameBn ? '<div class="rp-bn">' + esc(d.nameBn) + '</div>' : '') + '</header>'
+      (cells ? padPat(cells) : '') + '</header>'
   }
-  function padBar(cells) {
-    return '<div class="rp-bar">' + cells.map(function (c) { return '<span class="rp-k">' + c[0] + ':</span><span class="rp-v' + (c[2] ? ' ' + c[2] : '') + '">' + c[1] + '</span>' }).join('') + '</div>'
+  function padPat(cells) {
+    return '<div class="rp-pat">' + cells.map(function (c) { return '<span class="rp-k">' + c[0] + '</span><span class="rp-v' + (c[2] ? ' ' + c[2] : '') + '">' + c[1] + '</span>' }).join('') + '</div>'
   }
   function padPatCells(p, date, ref) {
     var a = animalOf(p), o = ownerOf(p)
@@ -1743,7 +1744,7 @@
     var fu = !secOn('fu') ? '' : fuSheet(), code = final ? final.code : 'XXXX-XXXX'
     R.push(padBlk('rp-end', '<div class="rp-fu">' + (fu || '<b>Follow-up after</b> <span class="rp-dots"></span> day(s) / month(s)') + '</div>' + padSign(d, dr.rxNo, code, 'Check code &middot; verify at pharmaz247.example/verify')))
     var ref = ['RX NO', esc(dr.rxNo) + (dr.continued ? ' (v' + dr.continued.next + ')' : '')]
-    return '<div class="rxdoc"><section class="rp-page">' + padHead(d) + padBar(padPatCells(p, D.today, ref)) +
+    return '<div class="rxdoc"><section class="rp-page">' + padHead(d, padPatCells(p, D.today, ref)) +
       '<div class="rp-body"><div class="rp-l">' + L.join('') + '</div><div class="rp-r">' + R.join('') + '</div></div>' + padFoot(d) + '</section></div>'
   }
   // Flow the blocks of every .rxdoc inside root over A4 pages. Safe to call again (e.g. after fonts load).
