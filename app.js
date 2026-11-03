@@ -1700,7 +1700,7 @@
   }
   function padFoot(d) {
     return '<footer class="rp-foot"><div class="rp-fa"><div class="rp-hn">' + esc(d.chamber) + '</div><div class="rp-ha">' + esc(d.chamberAddr) +
-      (d.chamberBn ? ' &middot; ' + esc(d.chamberBn) : '') + '</div></div><span class="rp-pg"></span></footer>'
+      (d.chamberBn ? ' &middot; ' + esc(d.chamberBn) : '') + '</div></div><div class="rp-fr"><span class="rp-brand">PharmaZ247</span><span class="rp-pg"></span></div></footer>'
   }
   function padSign(d, no, code, note) {
     return '<div class="rp-sign"><div class="rp-qr">' + qrHtml(no + code) + '<div><div class="chkcode">' + code + '</div><small>' + note + '</small></div></div>' +
@@ -2970,10 +2970,54 @@
   function rxDrawer(id) {
     var rx = rxById(id)
     if (!rx || !canRead(rx)) return toast('Prescription not found or not shared with you')
-    var mine = isMine(rx)
-    openModal({ title: rx.no, drawer: true, cls: 'drawer', rxd: id,
-      body: '<p class="muted">' + (mine ? 'Your prescription for ' + esc(D.patients[pidOfRx(rx)].name) : 'Shared by the patient - view only') + '</p>' + rxReadHtml(rx, { notes: true }) + '<div class="prx-win">' + editBox(rx) + '</div>',
-      foot: (mine ? '<button class="btn primary" data-act="rxEdit" data-id="' + id + '"' + (editOpen(rx) ? '' : ' disabled') + '>Edit</button><button class="btn ghost" data-act="routeOpen" data-id="' + id + '">Send to pharmacy branch</button>' : '') + '<button class="btn ghost" data-act="closeModal">Close</button>' })
+    var mine = isMine(rx), pid = pidOfRx(rx)
+    // Same A4 pad as the consultation preview / print (rxPadOf), not a summary.
+    openModal({ title: rx.no, cls: 'wide', rxd: id,
+      body: '<p class="muted">' + (mine ? 'Your prescription for ' + esc(D.patients[pid].name) : 'Shared by the patient - view only') + '</p><div class="prx-win">' + editBox(rx) + '</div>' +
+        '<div class="sheet-wrap">' + rxPadOf(rx, pid) + '</div>',
+      foot: (mine ? '<button class="btn primary" data-act="rxEdit" data-id="' + id + '"' + (editOpen(rx) ? '' : ' disabled') + '>Edit</button><button class="btn ghost" data-act="routeOpen" data-id="' + id + '">Send to pharmacy branch</button>' : '') +
+        '<button class="btn" data-act="printRx">' + ico('print') + ' Print</button><button class="btn ghost" data-act="closeModal">Close</button>' })
+    paginateRx($('#modalRoot'))
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { paginateRx($('#modalRoot')) })
+  }
+  // Rebuild a draft from a submitted record: the stored draftJson when there is one, else (seed records) the main parts.
+  // Sets S.draft (addLine writes to it); the caller sets S.pid first.
+  function draftFromRec(rx) {
+    if (rx.draftJson) { S.draft = JSON.parse(rx.draftJson); S.draft.rxNo = rx.no; return S.draft }
+    var dr = S.draft = newDraft(pat())
+    dr.rxNo = rx.no; dr.bnd = rx.bnd !== false
+    if (rx.snap && rx.snap.vitals) dr.vitals = Object.assign({}, dr.vitals, rx.snap.vitals)
+    rx.lines.forEach(function (hl) {
+      var l
+      if (hl.stop) { l = hl.medId ? lineFrom(hl.medId) : freeLine(hl.name); l.kind = 'STOP'; l.stopReason = hl.reason || '' } else l = lineFromHist(hl, rx)
+      l.cf = null; l.collapsed = false; addLine(l, true)
+    })
+    rx.tests.forEach(function (t) { dr.tests.push({ t: t }) })
+    // notes: the issued snapshot has every chip section (K/C/O, D/H, P/H, O/E...); older records only have C/C
+    var snapChips = rx.snap ? rx.snap.secs.filter(function (s) { return s.items.length && allSecDefs().some(function (d) { return d.kind === 'chips' && d.abbr === s.abbr }) }) : []
+    if (snapChips.length) snapChips.forEach(function (s) { var d = allSecDefs().filter(function (x) { return x.kind === 'chips' && x.abbr === s.abbr })[0]; s.items.forEach(function (t) { dr.notes[d.id].push({ t: t }) }) })
+    else rx.cc.forEach(function (t) { dr.notes.cc.push({ t: t }) })
+    if (rx.snap && rx.snap.res) dr.res = rx.snap.res.map(function (r) { return Object.assign({}, r) })
+    rx.dx.forEach(function (x) { dr.dx.push({ t: x.t, type: x.type }) })
+    rx.advice.forEach(function (t) { dr.notes.advice.push({ t: t }) })
+    // non-drug orders, referrals, admission advice, certificate
+    function cp(o) { return Object.assign({}, o) }
+    if (rx.orders) dr.orders = rx.orders.map(cp); if (rx.refs) dr.refs = rx.refs.map(cp); if (rx.adm) dr.adm = cp(rx.adm); if (rx.cert) dr.cert = cp(rx.cert)
+    var f = rx.fuRec
+    if (f && (f.n || f.note)) dr.fu = { unit: f.unit || 'days', n: f.n ? String(f.n) : '', note: f.note || '', rem: !!f.rem, remDays: String(f.remDays || 1), slot: f.time ? { date: f.slotDate || f.date, time: f.time } : null }
+    return dr
+  }
+  // The patient sees the exact printed pad (same renderer as preview / print). Global state is swapped in
+  // for the call and restored after, so an open consultation is not touched. All notes print (D6: nothing filtered).
+  function rxPadOf(rx, pid) {
+    var sv = { draft: S.draft, pid: S.pid, doc: S.doc, secs: S.sections, popup: S.popupQ, hist: S.printHist, today: D.today, ctr: S.rxCounter }
+    try {
+      S.pid = pid; S.doc = rx.by || (rx.byMe ? 'd1' : sv.doc || 'd1'); S.sections = S.sections.slice(); S.popupQ = []; S.printHist = true; D.today = rx.date
+      draftFromRec(rx)
+      return withDig(S.draft.bnd, function () { return sheetHtml0({ code: codeFor(rx.no) }) })
+    } finally {
+      S.draft = sv.draft; S.pid = sv.pid; S.doc = sv.doc; S.sections = sv.secs; S.popupQ = sv.popup; S.printHist = sv.hist; D.today = sv.today; S.rxCounter = sv.ctr
+    }
   }
   // Edit = in-place correction (same Rx number and version, new check code, copies printed earlier become "Not valid - changed"). A new version is a different thing: Continue from previous.
   function editStart(id) {
@@ -2983,20 +3027,8 @@
     var pid = pidOfRx(rx), sr = rx.serial || (D.appointments.filter(function (a) { return a.doc === S.doc && a.patientId === pid })[0] || {}).serial
     if (!sr) return toast('Prototype: no appointment to attach the edit to')
     S.pid = pid; S.serial = sr; S.popupQ = []; S.showErr = false; S.savedAt = null
-    var dr = S.draft = newDraft(pat())
-    dr.editing = rx.id; dr.rxNo = rx.no; dr.bannerOff = true; dr.bnd = rx.bnd !== false
-    if (rx.draftJson) { dr = S.draft = JSON.parse(rx.draftJson); dr.editing = rx.id; dr.rxNo = rx.no; dr.bannerOff = true } else { /* seed records have no stored draft: rebuild the main parts */
-    rx.lines.forEach(function (hl) {
-      var l
-      if (hl.stop) { l = hl.medId ? lineFrom(hl.medId) : freeLine(hl.name); l.kind = 'STOP'; l.stopReason = hl.reason || '' } else l = lineFromHist(hl, rx)
-      l.cf = null; l.collapsed = false; addLine(l, true)
-    })
-    rx.tests.forEach(function (t) { dr.tests.push({ t: t }) })
-    rx.cc.forEach(function (t) { dr.notes.cc.push({ t: t }) })
-    rx.dx.forEach(function (x) { dr.dx.push({ t: x.t, type: x.type }) })
-    rx.advice.forEach(function (t) { dr.notes.advice.push({ t: t }) })
-    if (rx.fuRec && rx.fuRec.n) dr.fu = { unit: rx.fuRec.unit, n: String(rx.fuRec.n), note: rx.fuRec.note || '', rem: !!rx.fuRec.rem, remDays: String(rx.fuRec.remDays || 1), slot: null }
-    }
+    var dr = S.draft = draftFromRec(rx)
+    dr.editing = rx.id; dr.bannerOff = true
     S.view = 'consult'; closeModal(); render()
     toast('Editing ' + rx.no + ' - editable for ' + leftText(leftMin(rx)) + '. The full prescription is loaded.')
   }

@@ -791,7 +791,11 @@ body[data-view="consult"] .proto { bottom: 78px; }
 .rp-fa { min-width: 0; }
 .rp-hn { font-size: 12px; font-weight: 700; line-height: 1.3; color: #2b3540; }
 .rp-ha { font-size: 10px; color: #6b7886; }
-.rp-pg { margin-left: auto; flex: none; font-size: 10px; color: #4d5b68; }
+/* PharmaZ247 wordmark, bottom right of every page (prescription pad + letters) */
+.rp-fr { margin-left: auto; flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.rp-brand { font-size: 13px; font-weight: 800; letter-spacing: -.01em; color: var(--rp); }
+.rp-pg { font-size: 10px; color: #4d5b68; }
+.rp-pg:empty { display: none; }
 
 /* referral / admission / certificate letters */
 .rp-lb { flex: 1; display: flex; flex-direction: column; padding: 18px 40px 24px; }
