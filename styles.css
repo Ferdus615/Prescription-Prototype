@@ -761,8 +761,6 @@ body[data-view="consult"] .proto { bottom: 78px; }
 
 /* Rx column */
 .rp-rxh { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.rp-rx { font-family: "Segoe Script", "Brush Script MT", "Lucida Handwriting", cursive; font-size: 40px; line-height: 1; color: var(--rp-d); }
-.rp-rx sub { font-size: 22px; }
 .rp-rxh .sh-title, .rp-rxh .sh-vet { flex-basis: 100%; text-align: left; }
 .rp-med { display: flex; gap: 8px; }
 .rp-n { flex: none; min-width: 18px; font-weight: 700; color: var(--rp-d); }

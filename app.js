@@ -1730,7 +1730,8 @@
       if (t) L.push(padBlk('rp-sec', '<div class="rp-sl">' + esc(def.title) + (def.abbr ? ' <abbr>' + esc(def.abbr) + '</abbr>' : '') + ':</div><div class="rp-sv">' + t + '</div>'))
     })
     if (!L.length) L.push(padBlk('rp-sec', '<div class="rp-sl">Clinical notes:</div><div class="rp-sv rp-none">None recorded</div>'))
-    R.push(padBlk('rp-rxh', '<span class="rp-rx">R<sub>x</sub></span>' + rxLabelHtml() + sheetTitle()))
+    var rxh = rxLabelHtml() + sheetTitle()
+    if (rxh) R.push(padBlk('rp-rxh', rxh))
     dr.lines.forEach(function (l, i) {
       if (isStop(l)) return R.push(padBlk('rp-med pm-stop', '<span class="rp-n">' + (i + 1) + '.</span><div><b>বন্ধ করুন / STOP: ' + esc(lineName(l)) + '</b>' + (l.stopReason ? '<div class="pm-i">' + esc(l.stopReason) + '</div>' : '') + '</div>'))
       R.push(padBlk('rp-med', '<span class="rp-n">' + (i + 1) + '.</span><div><div class="rp-mn"><b>' + esc(lineName(l)) + '</b> <span>' + esc(l.form) + '</span>' + (l.kind === 'CONT' ? ' <span class="pm-cont">চলবে / Continue</span>' : '') + (l.generic ? ' <small>' + esc(l.generic) + '</small>' : '') + '</div>' +
